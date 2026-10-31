@@ -217,6 +217,8 @@ openeverest-checkout: ## Check out openeverest/openeverest at OPENEVEREST_REF in
 install-crds: ## Install OpenEverest CRDs (and your operator's CRDs) into the cluster.
 	go mod download github.com/openeverest/openeverest/v2
 	kubectl apply --server-side --force-conflicts -f "$$(go list -m -f '{{.Dir}}' github.com/openeverest/openeverest/v2)/config/crd/bases"
+	kubectl wait --for condition=established --timeout=30s crd/backupstorageclasses.backup.openeverest.io
+	kubectl apply -f "$$(go list -m -f '{{.Dir}}' github.com/openeverest/openeverest/v2)/config/backupstorageclasses/s3.yaml"
 	# TODO: install your operator's CRDs, e.g.:
 	# curl -fsSL https://raw.githubusercontent.com/<org>/<operator>/v$(OPERATOR_VERSION)/deploy/crd.yaml | kubectl apply --server-side -f -
 
