@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	backupv1alpha1 "github.com/openeverest/openeverest/v2/api/backup/v1alpha1"
+	monitoringv1alpha1 "github.com/openeverest/openeverest/v2/api/monitoring/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-mariadb/definition/backupclasses"
@@ -60,6 +61,9 @@ func New() *MariaDBProvider {
 				batchv1.AddToScheme,
 				// StatefulSets tell whether the database has rolled out.
 				appsv1.AddToScheme,
+				// Sync lists MonitoringBindings and the conformance harness's
+				// scheme has only these.
+				monitoringv1alpha1.AddToScheme,
 			},
 			WatchConfigs: []controller.WatchConfig{
 				// Re-enqueue the Instance when its owned MariaDB CR changes
@@ -112,10 +116,7 @@ func (p *MariaDBProvider) Sync(c *controller.Context) error {
 	if err := SyncMaxScale(c); err != nil {
 		return err
 	}
-	if err := SyncServiceMonitor(c); err != nil {
-		return err
-	}
-	if err := SyncVMServiceScrape(c); err != nil {
+	if err := SyncMetricsCleanup(c); err != nil {
 		return err
 	}
 	if err := SyncScheduledBackups(c); err != nil {

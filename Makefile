@@ -166,7 +166,7 @@ test-integration-core-admission: ## Run admission webhook integration tests.
 	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/core/admission
 
 .PHONY: test-integration-monitoring
-test-integration-monitoring: ## Run monitoring integration tests.
+test-integration-monitoring: ## Run MonitoringBinding (spec.monitoring.destinations) integration tests.
 	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/monitoring
 
 .PHONY: test-integration-galera

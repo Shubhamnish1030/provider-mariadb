@@ -12,6 +12,7 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - namespaces
   - persistentvolumeclaims
   verbs:
   - get
@@ -51,6 +52,13 @@ rules:
   verbs:
   - create
   - patch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - delete
+  - get
 - apiGroups:
   - apps
   resources:
@@ -200,17 +208,28 @@ rules:
   - delete
   - get
 - apiGroups:
+  - monitoring.openeverest.io
+  resources:
+  - monitoringbindings
+  - monitoringclasses
+  - monitoringdestinations
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - monitoring.openeverest.io
+  resources:
+  - monitoringbindings/status
+  verbs:
+  - patch
+- apiGroups:
   - operator.victoriametrics.com
   resources:
   - vmservicescrapes
   verbs:
-  - create
   - delete
   - get
-  - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - snapshot.storage.k8s.io
   resources:
