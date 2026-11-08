@@ -31,6 +31,7 @@ import (
 	s3class "github.com/openeverest/openeverest/v2/backupstorageclasses/s3"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
+	"github.com/openeverest/provider-mariadb/definition/backupclasses"
 	mariadbbackup "github.com/openeverest/provider-mariadb/definition/backupclasses/mariadb"
 )
 
@@ -39,6 +40,10 @@ const (
 	backupTypeLogical = "logical"
 	// backupTypePhysical selects a physical (mariadb-backup) backup.
 	backupTypePhysical = "physical"
+
+	// backupClassName is the BackupClass the provider ships, defined in
+	// definition/backupclasses.
+	backupClassName = "mariadb"
 )
 
 // parseBackupParams decodes structured backup parameters (from a Backup CR or a
@@ -84,7 +89,7 @@ func operatorS3(c *controller.Context, bs *backupv1alpha1.BackupStorage, prefix 
 		return nil, err
 	}
 	// The operator can add a CA bundle but cannot skip certificate verification.
-	tls, err := c.BackupStorageTLS(bs, controller.TLSSupport{CustomCA: true})
+	tls, err := c.BackupStorageTLS(bs, backupclasses.TLSSupport(backupClassName, s3class.ClassName))
 	if err != nil {
 		return nil, err
 	}
