@@ -434,6 +434,9 @@ func (o *observation) waitingFor() string {
 		case p.sts == nil:
 			return "Waiting for the operator to create the MaxScale StatefulSet"
 		}
+		if wait := maxScaleStatefulSetBehind(p.mxs, p.sts); wait != "" {
+			return wait
+		}
 		if wait := rolloutWait(p.sts); wait != "" {
 			return "Waiting for " + wait
 		}
@@ -458,6 +461,19 @@ func statefulSetBehind(mdb *mariadbv1alpha1.MariaDB, sts *appsv1.StatefulSet) st
 	}
 	if container.Image != mdb.Spec.Image || !equality.Semantic.DeepEqual(container.Resources, resources) {
 		return "Waiting for the operator to apply the latest configuration"
+	}
+	return ""
+}
+
+// maxScaleStatefulSetBehind says what the operator has yet to apply to the
+// MaxScale StatefulSet, from its replica count and image, or "" when the
+// StatefulSet matches them.
+func maxScaleStatefulSetBehind(mxs *mariadbv1alpha1.MaxScale, sts *appsv1.StatefulSet) string {
+	if replicas := ptrInt32(sts.Spec.Replicas, 1); replicas != mxs.Spec.Replicas {
+		return fmt.Sprintf("Waiting for the operator to scale MaxScale to %d pods (it runs %d)", mxs.Spec.Replicas, replicas)
+	}
+	if c := findContainer(sts.Spec.Template.Spec.Containers, maxScaleContainerName); c != nil && c.Image != mxs.Spec.Image {
+		return "Waiting for the operator to apply the latest MaxScale configuration"
 	}
 	return ""
 }
@@ -539,6 +555,8 @@ func (o *observation) availability() (controller.Availability, string, string) {
 	}
 	return controller.Available, "", ""
 }
+
+const maxScaleContainerName = "maxscale"
 
 func findContainer(containers []corev1.Container, name string) *corev1.Container {
 	for i := range containers {

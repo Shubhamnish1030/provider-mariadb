@@ -134,9 +134,16 @@ func (sc *statusCluster) withProxy(ready bool) *statusCluster {
 	} else {
 		mxs.Status.Conditions = []metav1.Condition{notReadyCondition("NotReady", "Not ready")}
 	}
+	mxs.Spec.Replicas = maxScaleDefaultReplicas
+	mxs.Spec.Image = testMaxScaleImage
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{Name: mxs.Name, Namespace: "default", Generation: 1},
-		Spec:       appsv1.StatefulSetSpec{Replicas: ptr.To(maxScaleDefaultReplicas)},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: ptr.To(maxScaleDefaultReplicas),
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: maxScaleContainerName, Image: testMaxScaleImage}},
+			}},
+		},
 		Status: appsv1.StatefulSetStatus{
 			ObservedGeneration: 1,
 			Replicas:           maxScaleDefaultReplicas,
@@ -490,6 +497,15 @@ func TestStatusMariaDB_Proxy(t *testing.T) {
 		assert.False(t, status.Converged)
 		assert.Equal(t, "Waiting for the MaxScale proxy to be ready (the operator reports: Not ready)", status.Message)
 		assert.Equal(t, controller.Unavailable, status.Available)
+	})
+
+	t.Run("scale not applied to the StatefulSet yet", func(t *testing.T) {
+		sc := readyCluster("galera", 3).withProxy(true)
+		sc.extra[0].(*mariadbv1alpha1.MaxScale).Spec.Replicas = 3
+		status := sc.status(t)
+		assert.False(t, status.Converged)
+		assert.Equal(t, "Waiting for the operator to scale MaxScale to 3 pods (it runs 2)", status.Message)
+		assert.Equal(t, controller.Available, status.Available)
 	})
 
 	t.Run("ready", func(t *testing.T) {
