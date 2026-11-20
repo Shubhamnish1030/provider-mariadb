@@ -39,7 +39,6 @@ var (
 	componentsPath = field.NewPath("spec", "components")
 	enginePath     = componentsPath.Key(common.ComponentEngine)
 	proxyPath      = componentsPath.Key(common.ComponentProxy)
-	monitoringPath = componentsPath.Key(common.ComponentMonitoring)
 
 	minStorageSize = resource.MustParse("1Gi")
 
@@ -60,7 +59,6 @@ func (p *MariaDBProvider) Validate(in controller.ValidationInput) controller.Val
 
 	errs := validateEngine(instance)
 	errs = append(errs, validateProxy(spec, instance)...)
-	errs = append(errs, validateMonitoring(spec, instance)...)
 	errs = append(errs, validateTLS(instance)...)
 	errs = append(errs, validatePITR(instance)...)
 	errs = append(errs, validateDataSource(instance)...)
@@ -72,27 +70,20 @@ func (p *MariaDBProvider) Validate(in controller.ValidationInput) controller.Val
 	return controller.ValidationResult{Errors: errs}
 }
 
-// ValidateReferences checks the VMServiceScrape CRD, the bootstrap VolumeSnapshot, and the update
-// against the deployed MariaDB.
+// ValidateReferences checks the bootstrap VolumeSnapshot and the update against
+// the deployed MariaDB.
 func (p *MariaDBProvider) ValidateReferences(c *controller.Context) (field.ErrorList, error) {
-	errs, err := validateVMServiceScrapeCRD(c)
-	if err != nil {
-		return nil, err
-	}
-
 	mdb := &mariadbv1alpha1.MariaDB{}
 	if err := c.Get(mdb, c.Name()); err != nil {
 		if apierrors.IsNotFound(err) {
-			snapErrs, err := validateVolumeSnapshotReference(c, nil)
-			return append(errs, snapErrs...), err
+			return validateVolumeSnapshotReference(c, nil)
 		}
 		return nil, fmt.Errorf("get MariaDB: %w", err)
 	}
-	snapErrs, err := validateVolumeSnapshotReference(c, mdb)
+	errs, err := validateVolumeSnapshotReference(c, mdb)
 	if err != nil {
 		return nil, err
 	}
-	errs = append(errs, snapErrs...)
 	spec, err := c.ProviderSpec()
 	if err != nil {
 		return nil, fmt.Errorf("get provider spec: %w", err)
@@ -185,48 +176,6 @@ func validateProxy(spec *corev1alpha1.ProviderSpec, in *corev1alpha1.Instance) f
 	return append(errs, validateImage(spec, in, proxyPath, common.ComponentProxy)...)
 }
 
-// validateMonitoring checks the metrics exporter parameters and image.
-func validateMonitoring(spec *corev1alpha1.ProviderSpec, in *corev1alpha1.Instance) field.ErrorList {
-	monitoring, ok := in.Spec.Components[common.ComponentMonitoring]
-	if !ok {
-		return nil
-	}
-	if monitoring.Parameters == nil || monitoring.Parameters.Raw == nil {
-		return field.ErrorList{field.Required(monitoringPath.Child("parameters"), "")}
-	}
-	params, err := monitoringParams(in)
-	if err != nil {
-		return field.ErrorList{field.Invalid(monitoringPath.Child("parameters"), field.OmitValueType{}, err.Error())}
-	}
-	if !params.Enabled {
-		if params.VictoriaMetrics.Enabled {
-			return field.ErrorList{field.Invalid(monitoringPath.Child("parameters", "victoriaMetrics", "enabled"), true,
-				"requires spec.components[monitoring].parameters.enabled",
-			)}
-		}
-		return nil
-	}
-	return validateImage(spec, in, monitoringPath, common.ComponentMonitoring)
-}
-
-// validateVMServiceScrapeCRD checks the cluster serves the CRD VictoriaMetrics scraping needs.
-func validateVMServiceScrapeCRD(c *controller.Context) (field.ErrorList, error) {
-	params, err := monitoringParams(c.Instance())
-	if err != nil {
-		return nil, err
-	}
-	if !isVictoriaMetricsEnabled(params) {
-		return nil, nil
-	}
-	installed, err := vmServiceScrapeCRDInstalled(c)
-	if err != nil || installed {
-		return nil, err
-	}
-	return field.ErrorList{field.Invalid(monitoringPath.Child("parameters", "victoriaMetrics", "enabled"), true,
-		"the VMServiceScrape CRD (operator.victoriametrics.com) is not installed",
-	)}, nil
-}
-
 // validateImage checks that the component's image resolves.
 func validateImage(spec *corev1alpha1.ProviderSpec, in *corev1alpha1.Instance, path *field.Path, name string) field.ErrorList {
 	if componentImage(spec, in, name) != "" {
@@ -305,9 +254,13 @@ func validateDataSource(in *corev1alpha1.Instance) field.ErrorList {
 	)}
 }
 
-// provisioned reports whether the Instance got past validation, so its engine may exist.
+// provisioned reports whether the provider has reconciled the Instance
+// before, and so may have created its engine. The runtime records the version
+// bundle it applies the first time a reconcile gets through the provider, and
+// keeps it from then on. The phase does not tell: an Instance stays Pending
+// until its database is first available, long after its pods were started.
 func provisioned(in *corev1alpha1.Instance) bool {
-	return in != nil && in.Status.Phase != "" && in.Status.Phase != corev1alpha1.InstancePhasePending
+	return in != nil && in.Status.Version != ""
 }
 
 // engineState is what an engine runs, to check an update against.

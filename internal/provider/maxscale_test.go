@@ -228,35 +228,3 @@ func TestBuildConnectionDetails_ThroughMaxScale(t *testing.T) {
 	assert.Equal(t, "maxscale-ca", details.AdditionalProperties[tlsCAKey])
 	assert.Equal(t, "mariadb-ca", details.AdditionalProperties[adminCAKey])
 }
-
-func TestStatusMariaDB_WaitsForMaxScale(t *testing.T) {
-	readyCondition := metav1.Condition{
-		Type:               mariadbv1alpha1.ConditionTypeReady,
-		Status:             metav1.ConditionTrue,
-		Reason:             "Ready",
-		LastTransitionTime: metav1.Now(),
-	}
-	mdb := &mariadbv1alpha1.MariaDB{
-		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-		Status:     mariadbv1alpha1.MariaDBStatus{Conditions: []metav1.Condition{readyCondition}},
-	}
-	credentials := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: userSecretName("test"), Namespace: "default"},
-		Data:       map[string][]byte{userPasswordSecretKey: []byte("password")},
-	}
-
-	rootCredentials := connectionSecrets("test")[1]
-
-	status, err := StatusMariaDB(newProxyContext(t, "galera", `{"tls":{"enabled":false}}`, `{"enabled":true}`, mdb, credentials, rootCredentials))
-	require.NoError(t, err)
-	assert.Equal(t, controller.Provisioning("Waiting for MaxScale proxy to be created"), status)
-
-	mxs := &mariadbv1alpha1.MaxScale{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-maxscale", Namespace: "default"},
-		Status:     mariadbv1alpha1.MaxScaleStatus{Conditions: []metav1.Condition{readyCondition}},
-	}
-	status, err = StatusMariaDB(newProxyContext(t, "galera", `{"tls":{"enabled":false}}`, `{"enabled":true}`, mdb, credentials, rootCredentials, mxs))
-	require.NoError(t, err)
-	assert.Equal(t, corev1alpha1.InstancePhaseReady, status.Phase)
-	assert.Equal(t, "test-maxscale.default.svc", status.ConnectionDetails.Host)
-}

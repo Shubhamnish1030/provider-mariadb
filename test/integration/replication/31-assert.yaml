@@ -14,4 +14,6 @@ kind: Instance
 metadata:
   name: test-replication
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+  (conditions[?type == 'Available'].status | [0]): "True"

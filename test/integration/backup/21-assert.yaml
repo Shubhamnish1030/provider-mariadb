@@ -5,7 +5,9 @@ kind: Instance
 metadata:
   name: physical-source
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+  (conditions[?type == 'Available'].status | [0]): "True"
 ---
 apiVersion: v1
 kind: Secret

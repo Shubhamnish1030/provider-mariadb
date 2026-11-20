@@ -1,12 +1,15 @@
 # Expected outcome of the instance-running step: once the real mariadb-operator
-# provisions the cluster, the provider's Status() surfaces phase Ready and the
-# runtime publishes connection details.
+# provisions the cluster, the provider's Status() reports it converged and
+# available, the Instance is Ready, and the runtime publishes connection
+# details.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
   name: test-instance
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+  (conditions[?type == 'Available'].status | [0]): "True"
   components:
     - name: engine
       selector: core.openeverest.io/component=engine,core.openeverest.io/instance=test-instance

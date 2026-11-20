@@ -38,7 +38,7 @@ func withSnapshot(raw string) func(*corev1alpha1.Instance) {
 func TestValidateVolumeSnapshotBootstrap(t *testing.T) {
 	t.Parallel()
 	v := validationtest.New(t, New(), providerSpecPath)
-	ready := func(in *corev1alpha1.Instance) { in.Status.Phase = corev1alpha1.InstancePhaseReady }
+	ready := func(in *corev1alpha1.Instance) { in.Status.Version = reconciledVersion }
 
 	tests := []struct {
 		name string

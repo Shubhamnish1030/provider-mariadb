@@ -104,6 +104,14 @@ func pruneMaxScaleZeroDefaults(obj map[string]any) {
 	pruneUnset(obj)
 }
 
+// maxScaleReplicas is the proxy's pod count, or its default.
+func maxScaleReplicas(in *corev1alpha1.Instance) int32 {
+	if replicas := in.Spec.Components[common.ComponentProxy].Replicas; replicas != nil {
+		return *replicas
+	}
+	return maxScaleDefaultReplicas
+}
+
 // desiredMaxScale builds the MaxScale fields the provider owns from the proxy
 // component.
 func desiredMaxScale(c *controller.Context) (*mariadbv1alpha1.MaxScale, error) {
@@ -115,10 +123,7 @@ func desiredMaxScale(c *controller.Context) (*mariadbv1alpha1.MaxScale, error) {
 		return nil, err
 	}
 
-	replicas := maxScaleDefaultReplicas
-	if proxy.Replicas != nil {
-		replicas = *proxy.Replicas
-	}
+	replicas := maxScaleReplicas(c.Instance())
 
 	var resources *mariadbv1alpha1.ResourceRequirements
 	if proxy.Resources != nil && (proxy.Resources.Limits != nil || proxy.Resources.Requests != nil) {
@@ -204,27 +209,6 @@ func teardownMaxScale(c *controller.Context) error {
 		return fmt.Errorf("delete MaxScale %q: %w", mxs.Name, err)
 	}
 	return nil
-}
-
-// readyMaxScale returns the MaxScale CR once it is ready to serve clients.
-// While it is not, the returned message describes what is being waited for.
-func readyMaxScale(c *controller.Context) (*mariadbv1alpha1.MaxScale, string, error) {
-	mxs := &mariadbv1alpha1.MaxScale{}
-	if err := c.Get(mxs, maxScaleName(c.Name())); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, "Waiting for MaxScale proxy to be created", nil
-		}
-		return nil, "", fmt.Errorf("get MaxScale: %w", err)
-	}
-	if !mxs.IsReady() {
-		for _, cond := range mxs.Status.Conditions {
-			if cond.Type == mariadbv1alpha1.ConditionTypeReady && cond.Message != "" {
-				return nil, "MaxScale: " + cond.Message, nil
-			}
-		}
-		return nil, "Waiting for MaxScale proxy to be ready", nil
-	}
-	return mxs, "", nil
 }
 
 // resolveMaxScaleImage returns the MaxScale image from the proxy component

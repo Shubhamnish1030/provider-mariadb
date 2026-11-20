@@ -48,7 +48,7 @@ manages pods directly — all lifecycle work is delegated to the operator.
 
 | provider-mariadb | OpenEverest | mariadb-operator | Kubernetes |
 |---|---|---|---|
-| `0.3.x` | `2.0.0-dev.5` | `26.10.x` | `1.30` – `1.34` |
+| `0.3.x` | `2.0.0-alpha.1` | `26.10.x` | `1.30` – `1.34` |
 | `0.2.x` | `>= 2.0.0` | `26.10.x` | `1.30` – `1.34` |
 | `0.1.x` | `>= 2.0.0` | `26.6.x` (≤ 0.1.5), `26.10.x` (≥ 0.1.6) | `1.30` – `1.34` |
 
@@ -67,7 +67,7 @@ provider itself is covered under [Installation](#installation).
 | High availability (replication) | ✅ | `spec.topology.type: replication` — async primary/replica cluster; at least 2 nodes (default 3). With a backup storage in `spec.backup`, replicas that break are rebuilt automatically |
 | Proxy / load balancing (MaxScale) | ✅ | opt-in via the `proxy` component on `galera` and `replication`; see [MaxScale proxy](#maxscale-proxy) |
 | Custom configuration | ✅ | `my.cnf` via the engine component's `configuration` parameter |
-| Monitoring | ✅ | opt-in via the `monitoring` component; deploys `mysqld-exporter` and a Prometheus `ServiceMonitor` — requires the `ServiceMonitor` CRD (`monitoring.coreos.com`) unless `serviceMonitor.enabled: false`. `victoriaMetrics.enabled` creates a `VMServiceScrape` instead — requires the `VMServiceScrape` CRD (`operator.victoriametrics.com`); the `ServiceMonitor` stays off unless `serviceMonitor.enabled` is set |
+| Monitoring | ✅ | any metrics backend through `mysqld-exporter`, via `spec.monitoring.destinations` — see [Monitoring](#monitoring) |
 | Pod scheduling | ✅ | `spec.components.{engine,proxy}.schedulingPolicy` — `affinity` (`nodeAffinity` and `podAntiAffinity`; `podAffinity` is rejected), `nodeSelector`, `tolerations` and `topologySpreadConstraints`; `schedulerName` is not supported. A set `affinity` replaces the HA default soft anti-affinity, `{}` sets none |
 | TLS | ✅ | enabled by default with operator-managed certificates; CA is published in the connection Secret |
 
@@ -201,6 +201,107 @@ TLS can be explicitly disabled with `tls.enabled: false`. Galera deployments
 also encrypt state snapshot transfers by default; this can be changed with
 `tls.galeraSSTEnabled`. See [examples/instance-tls.yaml](examples/instance-tls.yaml).
 
+### Status
+
+The provider reports what it observes, and OpenEverest derives the `Instance`
+conditions from it the same way for every provider. `status.phase` is
+`Pending` until the database has first been available, `Provisioned` after
+that, and `Terminating` once deletion is requested; the conditions carry the
+rest.
+
+| Condition | What this provider reports |
+|---|---|
+| `Available` | `True` while clients can connect. Galera needs a ready node; `standalone` and `replication` need their primary pod (`status.currentPrimary` on the `MariaDB`) to be ready, so a replication cluster stays available while a replica restarts. With the MaxScale proxy, a MaxScale pod must be ready too, and the initial user, whose credentials are the connection details, must exist with its grant: the operator creates them only after the `MariaDB` is ready. `Unknown` when the operator has not reported a primary, `False` while a restore runs or a new `Instance` is seeded. The reason names the cause, for example `NoPrimary`. |
+| `Ready` | `True` once the database runs what the `Instance` asks for: the operator reports the `MariaDB` ready, its StatefulSet carries the latest image, resources and replica count from the `MariaDB` and has rolled out, and the MaxScale proxy, if any, is ready. Until then the message says what is being waited for, in the operator's words where it has any. |
+| `Restoring` | `True` while a `Restore` of the `Instance` runs, and while a new `Instance` is seeded from `spec.dataSource`. |
+| `Upgrading` | `True` while a MariaDB pod runs another image than the `MariaDB` asks for, which is how an engine version change rolls out. |
+| `StorageResizing` | `True` while the operator resizes the data volumes. |
+
+The connection details Secret is written the first time the database is
+available, and kept current while a change rolls out.
+
+Each component reports `desiredReplicas`, the pods it will have once the
+database runs the `Instance`'s current spec, defaults included: `engine`, and
+`proxy` when MaxScale is enabled.
+
+A problem makes the `Instance` not `Ready`, with a reason that says what is
+wrong. Problems come from the reason of the operator's `Ready` condition on
+the `MariaDB`:
+
+| Reason | Cause |
+|---|---|
+| `SuspendedOutsideOpenEverest` | `spec.suspend` is set on the `MariaDB`, so the operator applies no changes. Only unsetting it there resumes them. |
+| `InitializationFailed` | The operator could not initialize the database. |
+| `ScaleOutFailed` | Adding a replica failed. |
+| `ReplicaRecoveryFailed` | Recovering a broken replica failed. |
+| `BinlogArchivingFailed` | Archiving binary logs for point-in-time recovery failed. |
+| `BinlogReplayFailed` | Replaying binary logs during a point-in-time recovery failed. |
+| `EngineError` | Any other error the operator reports; the message quotes it. |
+
+A write the operator made from a stale read is not a problem: the operator
+retries it at once. Pods that crash or cannot be scheduled are reported by
+OpenEverest from the pods themselves.
+
+Limits of what the provider can know:
+
+- The operator does not record which generation of the `MariaDB` its `Ready`
+  condition is about. The provider compares the fields the operator copies to
+  the StatefulSet (image, resources, replicas) instead, so a change to any
+  other field can read as `Ready` for the moment before the operator acts on
+  it.
+- An operator error is never terminal, because the operator does not say
+  which generation it is about: right after a fix, the error still showing
+  may be the one being fixed.
+- Availability is read from pod readiness, as fresh as the last pod event the
+  provider has seen.
+
+## Monitoring
+
+Monitoring is configured through `MonitoringDestination`s: each entry of
+`spec.monitoring.destinations` sends the instance's monitoring data to one
+destination.
+
+```yaml
+spec:
+  monitoring:
+    destinations:
+      - name: prometheus
+        destinationRef:
+          name: prometheus
+```
+
+The provider declares its monitoring contract in
+[definition/monitoring.yaml](definition/monitoring.yaml): a `mysqld-exporter`
+metrics endpoint for the `mariadb` component type, whose kind (`mariadb`, the
+name monitoring classes match on) is declared in
+[definition/provider.yaml](definition/provider.yaml). It renders no
+operator-native integration such as PMM.
+
+- **Metrics backends** (for example the `prometheus` and `victoriametrics`
+  classes) turn on the operator's `mysqld-exporter` (`spec.metrics`) while one
+  of the instance's destinations requires metrics. The exporter runs as a
+  separate Deployment (`<name>-metrics`), so the MariaDB pods are not
+  restarted, and logs in as a metrics user the operator creates. Its image is
+  pinned by the `mysqld-exporter` component type in
+  [definition/versions.yaml](definition/versions.yaml).
+- While the exporter runs, the provider publishes one endpoint per MariaDB pod
+  in `status.monitoring.sources`: the exporter's `/probe` on the
+  `metrics` port with the pod as `target`, which the class's extension turns
+  into the `instance` label when it creates the scrape resources. The
+  operator's own `ServiceMonitor` stays off.
+- Once no destination requires metrics, the provider deletes the exporter
+  Deployment, which the operator leaves behind.
+
+`kubectl get monitoringbindings` lists one binding per destination entry, and
+the instance's `MonitoringConfigured` condition reports whether every entry is
+configured. See [examples/instance-monitoring.yaml](examples/instance-monitoring.yaml).
+
+> [!NOTE]
+> Up to `0.2.x`, metrics were configured through a `monitoring` component. That
+> component is gone: move to `spec.monitoring.destinations`. The provider
+> deletes the `ServiceMonitor` and `VMServiceScrape` the earlier versions
+> created.
+
 ## MaxScale proxy
 
 The `galera` and `replication` topologies can be fronted by
@@ -297,7 +398,7 @@ spec:
 `spec.dataSource` is immutable once set and requires `spec.backup.enabled: true`
 with at least one storage so the provider can read the source backup. The new
 Instance reuses the source Instance's credentials, because the backup carries
-its users. It reports the `Restoring` phase until the data is in place: physical
+its users. Its `Restoring` condition is `True` until the data is in place: physical
 backups are restored before MariaDB starts, while logical backups are replayed
 once the new cluster is up.
 

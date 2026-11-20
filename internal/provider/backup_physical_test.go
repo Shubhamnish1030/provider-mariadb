@@ -410,29 +410,6 @@ func TestSyncDataSourceStatusLogical(t *testing.T) {
 	})
 }
 
-func TestStatusMariaDBHoldsPhaseWhileSeeding(t *testing.T) {
-	t.Run("restoring while a logical backup is not yet applied", func(t *testing.T) {
-		c := newContextForInstance(t, instanceSeededFrom("backup-1"), logicalBootstrapMariaDB(mariadbReady))
-		require.NoError(t, syncDataSourceStatus(c))
-
-		status, err := StatusMariaDB(c)
-		require.NoError(t, err)
-		assert.Equal(t, corev1alpha1.InstancePhaseRestoring, status.Phase)
-	})
-
-	t.Run("failed when seeding failed", func(t *testing.T) {
-		c := newContextForInstance(t, instanceSeededFrom("backup-1"), logicalBootstrapMariaDB(mariadbReady))
-		c.SetDataSourceStatus(controller.DataSourceStatus{
-			Done:  true,
-			State: controller.DataSourceStateFailed,
-		})
-
-		status, err := StatusMariaDB(c)
-		require.NoError(t, err)
-		assert.Equal(t, corev1alpha1.InstancePhaseFailed, status.Phase)
-	})
-}
-
 func TestSyncScheduledBackupsDispatchesToPhysical(t *testing.T) {
 	mdb := &mariadbv1alpha1.MariaDB{ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "ns"}}
 	instance := instanceWithSchedule(corev1alpha1.InstanceBackupSchedule{

@@ -1,13 +1,15 @@
 # Expected outcome of the cluster-running step: once the real mariadb-operator
-# bootstraps the 3-node Galera cluster, the provider's Status() surfaces phase
-# Ready and the runtime publishes connection details pointing at the primary
+# bootstraps the 3-node Galera cluster, the Instance is Ready and Available
+# and the runtime publishes connection details pointing at the primary
 # Service. The operator also creates an HA PodDisruptionBudget for the cluster.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
   name: test-galera
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+  (conditions[?type == 'Available'].status | [0]): "True"
 ---
 apiVersion: v1
 kind: Secret

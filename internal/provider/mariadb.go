@@ -333,75 +333,6 @@ func configureService(svc *corev1alpha1.Service) *mariadbv1alpha1.ServiceTemplat
 	return tmpl
 }
 
-// StatusMariaDB reads the MariaDB CR status and translates it to an Instance status.
-func StatusMariaDB(c *controller.Context) (controller.Status, error) {
-	mariadbCR := &mariadbv1alpha1.MariaDB{}
-	if err := c.Get(mariadbCR, c.Name()); err != nil {
-		if apierrors.IsNotFound(err) {
-			return controller.Provisioning("Waiting for MariaDB cluster to be created"), nil
-		}
-		return controller.Status{}, fmt.Errorf("get MariaDB: %w", err)
-	}
-
-	// Seeding from spec.dataSource owns the phase until it reaches a terminal
-	// state: a logical restore runs while the MariaDB is already Ready, and the
-	// Instance must not expose connection details for an empty database.
-	if ds := c.GetDataSourceStatus(); ds != nil {
-		if ds.State == controller.DataSourceStateFailed {
-			return controller.Failed(ds.Message), nil
-		}
-		if !ds.Done {
-			return controller.Restoring(ds.Message), nil
-		}
-	}
-
-	// An instance started from a snapshot isn't handed out with its source's
-	// root password, nor right before its pods restart to replace it.
-	if pending, err := rootRotationPending(c, mariadbCR); err != nil {
-		return controller.Status{}, err
-	} else if pending {
-		return controller.Provisioning(rootRotationMessage), nil
-	}
-
-	// Check the Ready condition.
-	if mariadbCR.IsReady() {
-		proxyEnabled, err := isProxyEnabled(c.Instance())
-		if err != nil {
-			return controller.Status{}, err
-		}
-		var mxs *mariadbv1alpha1.MaxScale
-		if proxyEnabled {
-			ready, msg, err := readyMaxScale(c)
-			if err != nil {
-				return controller.Status{}, err
-			}
-			if ready == nil {
-				return controller.Provisioning(msg), nil
-			}
-			mxs = ready
-		}
-
-		details, err := buildConnectionDetails(c, mxs)
-		if err != nil {
-			if errors.Is(err, errTLSCABundleNotReady) {
-				return controller.Provisioning("Waiting for MariaDB TLS CA bundle"), nil
-			}
-			if apierrors.IsNotFound(err) {
-				return controller.Provisioning("Waiting for MariaDB credentials secret"), nil
-			}
-			return controller.Status{}, err
-		}
-		return controller.ReadyWithConnectionDetails(details), nil
-	}
-
-	// Extract a useful message from the Ready condition if available.
-	if cond, ok := getReadyCondition(mariadbCR); ok && cond.Message != "" {
-		return controller.Provisioning(cond.Message), nil
-	}
-
-	return controller.Provisioning("Waiting for MariaDB cluster to be ready"), nil
-}
-
 // Keys of the admin connection published next to the application user's.
 // They describe a direct connection to the database server as root, for
 // tools that need server-level privileges, such as migrations that configure
@@ -592,14 +523,4 @@ func CleanupMariaDB(c *controller.Context) error {
 	}
 
 	return nil
-}
-
-// getReadyCondition returns the Ready condition from the MariaDB status, if present.
-func getReadyCondition(m *mariadbv1alpha1.MariaDB) (metav1.Condition, bool) {
-	for _, cond := range m.Status.Conditions {
-		if cond.Type == mariadbv1alpha1.ConditionTypeReady {
-			return cond, true
-		}
-	}
-	return metav1.Condition{}, false
 }
