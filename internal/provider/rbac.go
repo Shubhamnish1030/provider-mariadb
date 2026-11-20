@@ -39,6 +39,7 @@ package provider
 // MaxScale CRs — proxy component.
 // +kubebuilder:rbac:groups=k8s.mariadb.com,resources=maxscales,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=k8s.mariadb.com,resources=maxscales/status,verbs=get
+// +kubebuilder:rbac:groups=k8s.mariadb.com,resources=users;grants,verbs=get;list;watch
 
 // ServiceMonitor CRs — the operator does not delete the ServiceMonitor once disabled.
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;delete

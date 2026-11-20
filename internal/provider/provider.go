@@ -82,7 +82,16 @@ func New() *MariaDBProvider {
 				// report ready before it has. They are owned by the operator's
 				// objects, so map them by their owner.
 				controller.WatchExternal(&appsv1.StatefulSet{},
-					handler.EnqueueRequestsFromMapFunc(enqueueStatefulSetInstance()),
+					handler.EnqueueRequestsFromMapFunc(enqueueOperatorChildInstance()),
+				),
+				// Re-enqueue when the initial User or Grant gets ready: the
+				// operator creates them after the MariaDB is ready, and the
+				// connection details are their credentials.
+				controller.WatchExternal(&mariadbv1alpha1.User{},
+					handler.EnqueueRequestsFromMapFunc(enqueueOperatorChildInstance()),
+				),
+				controller.WatchExternal(&mariadbv1alpha1.Grant{},
+					handler.EnqueueRequestsFromMapFunc(enqueueOperatorChildInstance()),
 				),
 			},
 		},

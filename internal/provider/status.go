@@ -63,6 +63,7 @@ const (
 	reasonPrimaryNotReported   = "PrimaryNotReported"
 	reasonNoNodeReady          = "NoNodeReady"
 	reasonNoProxyReady         = "NoProxyReady"
+	reasonInitialUserNotReady  = "InitialUserNotReady"
 )
 
 // reasonRollingOutImage is the reason of the Upgrading operation.
@@ -112,6 +113,9 @@ type observation struct {
 	// rotatingRoot is true while the root password copied from a snapshot's
 	// source is being replaced.
 	rotatingRoot bool
+	// userWait says what the initial user, whose credentials are the
+	// connection details, still waits for, or "" once it can log in.
+	userWait string
 }
 
 // proxyObservation is what the provider reads about the MaxScale proxy.
@@ -197,6 +201,9 @@ func observe(c *controller.Context) (*observation, error) {
 	if obs.pods, err = mariadbPods(c); err != nil {
 		return nil, err
 	}
+	if obs.userWait, err = initialUserWait(c, mdb); err != nil {
+		return nil, err
+	}
 
 	proxyEnabled, err := isProxyEnabled(c.Instance())
 	if err != nil {
@@ -235,6 +242,35 @@ func uncachedMariaDB(c *controller.Context) (*mariadbv1alpha1.MariaDB, error) {
 		return nil, fmt.Errorf("decode MariaDB %q: %w", c.Name(), err)
 	}
 	return mdb, nil
+}
+
+// initialUserWait says what keeps the initial user from logging in, or ""
+// when nothing does. The operator creates it, and its grant, through User and
+// Grant objects only once the MariaDB is ready, so the database serves
+// clients a moment before the published credentials work.
+func initialUserWait(c *controller.Context, mdb *mariadbv1alpha1.MariaDB) (string, error) {
+	if !mdb.IsInitialUserEnabled() {
+		return "", nil
+	}
+	user := &mariadbv1alpha1.User{}
+	switch err := c.Get(user, mdb.MariadbUserKey().Name); {
+	case apierrors.IsNotFound(err):
+		return "Waiting for the operator to create the initial user", nil
+	case err != nil:
+		return "", fmt.Errorf("get User: %w", err)
+	case !user.IsReady():
+		return "Waiting for the operator to create the initial user", nil
+	}
+	grant := &mariadbv1alpha1.Grant{}
+	switch err := c.Get(grant, mdb.MariadbGrantKey().Name); {
+	case apierrors.IsNotFound(err):
+		return "Waiting for the operator to grant the initial user its privileges", nil
+	case err != nil:
+		return "", fmt.Errorf("get Grant: %w", err)
+	case !grant.IsReady():
+		return "Waiting for the operator to grant the initial user its privileges", nil
+	}
+	return "", nil
 }
 
 // statefulSet returns the named StatefulSet, or nil when it does not exist.
@@ -404,6 +440,9 @@ func (o *observation) waitingFor() string {
 		}
 		return "Waiting for the operator to report MariaDB ready"
 	}
+	if o.userWait != "" {
+		return o.userWait
+	}
 	if mdb.HasPendingUpdate() {
 		return "Waiting for the operator to update the pods"
 	}
@@ -553,6 +592,11 @@ func (o *observation) availability() (controller.Availability, string, string) {
 	if p := o.proxy; p != nil && (p.sts == nil || p.sts.Status.ReadyReplicas == 0) {
 		return controller.Unavailable, reasonNoProxyReady, "No MaxScale proxy pod is ready"
 	}
+	// The published credentials are the initial user's: until it can log in,
+	// clients given them cannot connect.
+	if o.userWait != "" {
+		return controller.Unavailable, reasonInitialUserNotReady, o.userWait
+	}
 	return controller.Available, "", ""
 }
 
@@ -586,12 +630,11 @@ func ptrInt32(p *int32, def int32) int32 {
 	return *p
 }
 
-// enqueueStatefulSetInstance maps a StatefulSet of the database or of its
-// MaxScale proxy to the Instance: the Instance has converged only once they
-// have rolled out, which the operator's own status can report too early.
-// They are owned by the MariaDB or MaxScale object, whose name is derived
-// from the Instance's.
-func enqueueStatefulSetInstance() func(ctx context.Context, obj client.Object) []reconcile.Request {
+// enqueueOperatorChildInstance maps an object the operator creates for the
+// database or its MaxScale proxy (a StatefulSet, the initial User or Grant)
+// to the Instance, whose status depends on it. They are owned by the MariaDB
+// or MaxScale object, whose name is derived from the Instance's.
+func enqueueOperatorChildInstance() func(ctx context.Context, obj client.Object) []reconcile.Request {
 	return func(_ context.Context, obj client.Object) []reconcile.Request {
 		owner := metav1.GetControllerOf(obj)
 		if owner == nil || !strings.HasPrefix(owner.APIVersion, mariadbv1alpha1.GroupVersion.Group+"/") {

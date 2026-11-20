@@ -54,6 +54,8 @@ type statusCluster struct {
 	mdb      *mariadbv1alpha1.MariaDB
 	sts      *appsv1.StatefulSet
 	pods     []*corev1.Pod
+	user     *mariadbv1alpha1.User
+	grant    *mariadbv1alpha1.Grant
 	extra    []client.Object
 }
 
@@ -72,6 +74,22 @@ func readyCluster(topology string, replicas int32) *statusCluster {
 		},
 	}
 	sc.mdb.Spec.Image = statusTestImage
+	sc.mdb.Spec.Username = ptr.To(defaultInitialUser)
+	sc.mdb.Spec.Database = ptr.To(defaultInitialDatabase)
+	sc.mdb.Spec.PasswordSecretKeyRef = &mariadbv1alpha1.GeneratedSecretKeyRef{
+		SecretKeySelector: mariadbv1alpha1.SecretKeySelector{
+			LocalObjectReference: mariadbv1alpha1.LocalObjectReference{Name: userSecretName("test")},
+			Key:                  userPasswordSecretKey,
+		},
+	}
+	sc.user = &mariadbv1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: sc.mdb.MariadbUserKey().Name, Namespace: "default"},
+		Status:     mariadbv1alpha1.UserStatus{Conditions: []metav1.Condition{readyCondition("Created", "Created")}},
+	}
+	sc.grant = &mariadbv1alpha1.Grant{
+		ObjectMeta: metav1.ObjectMeta{Name: sc.mdb.MariadbGrantKey().Name, Namespace: "default"},
+		Status:     mariadbv1alpha1.GrantStatus{Conditions: []metav1.Condition{readyCondition("Created", "Created")}},
+	}
 	if topology == "galera" {
 		sc.mdb.Spec.Galera = &mariadbv1alpha1.Galera{Enabled: true}
 	}
@@ -194,6 +212,12 @@ func (sc *statusCluster) context(t *testing.T) *controller.Context {
 	}
 	for _, p := range sc.pods {
 		objs = append(objs, p)
+	}
+	if sc.user != nil {
+		objs = append(objs, sc.user)
+	}
+	if sc.grant != nil {
+		objs = append(objs, sc.grant)
 	}
 	objs = append(objs, sc.extra...)
 
@@ -394,6 +418,28 @@ func TestStatusMariaDB_Problems(t *testing.T) {
 	}
 }
 
+func TestStatusMariaDB_InitialUser(t *testing.T) {
+	t.Run("not created yet", func(t *testing.T) {
+		sc := readyCluster("replication", 3)
+		sc.user, sc.grant = nil, nil
+		status := sc.status(t)
+		assert.False(t, status.Converged)
+		assert.Equal(t, "Waiting for the operator to create the initial user", status.Message)
+		assert.Equal(t, controller.Unavailable, status.Available)
+		assert.Equal(t, reasonInitialUserNotReady, status.AvailableReason)
+		assert.True(t, status.ConnectionDetails.IsEmpty(), "credentials that do not work yet are not handed out")
+	})
+
+	t.Run("not granted yet", func(t *testing.T) {
+		sc := readyCluster("replication", 3)
+		sc.grant.Status.Conditions = []metav1.Condition{notReadyCondition("Failed", "Error")}
+		status := sc.status(t)
+		assert.False(t, status.Converged)
+		assert.Equal(t, "Waiting for the operator to grant the initial user its privileges", status.Message)
+		assert.Equal(t, controller.Unavailable, status.Available)
+	})
+}
+
 func TestStatusMariaDB_SuspendedOutsideOpenEverest(t *testing.T) {
 	sc := readyCluster("galera", 3)
 	sc.mdb.Spec.Suspend = true
@@ -529,7 +575,7 @@ func TestEnqueueStatefulSetInstance(t *testing.T) {
 			}},
 		}}
 	}
-	enqueue := enqueueStatefulSetInstance()
+	enqueue := enqueueOperatorChildInstance()
 	want := []types.NamespacedName{{Namespace: "ns", Name: "db"}}
 	for _, obj := range []*appsv1.StatefulSet{owned("MariaDB", "db"), owned("MaxScale", "db-maxscale")} {
 		var got []types.NamespacedName

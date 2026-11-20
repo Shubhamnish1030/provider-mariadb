@@ -171,6 +171,15 @@
 - apiGroups:
     - k8s.mariadb.com
   resources:
+    - grants
+    - users
+  verbs:
+    - get
+    - list
+    - watch
+- apiGroups:
+    - k8s.mariadb.com
+  resources:
     - mariadbs/finalizers
   verbs:
     - update
