@@ -1,0 +1,11 @@
+# A scraper OpenEverest does not configure: the Always policy runs the
+# exporter without any destination.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance-monitoring
+spec:
+  monitoring:
+    sources:
+      metrics:
+        policy: Always

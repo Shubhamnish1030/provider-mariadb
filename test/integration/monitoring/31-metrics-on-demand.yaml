@@ -1,0 +1,10 @@
+# Back to OnDemand: with no destination, nothing requires metrics.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance-monitoring
+spec:
+  monitoring:
+    sources:
+      metrics:
+        policy: OnDemand

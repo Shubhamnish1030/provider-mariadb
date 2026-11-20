@@ -187,9 +187,28 @@ func TestMetricsExporterRequired(t *testing.T) {
 	tests := []struct {
 		name    string
 		entries []corev1alpha1.InstanceMonitoringDestination
+		policy  corev1alpha1.MonitoringSourcePolicy
 		objs    []client.Object
 		want    bool
 	}{
+		{
+			name:   "the Always policy runs the exporter without a destination",
+			policy: corev1alpha1.MonitoringSourcePolicyAlways,
+			objs:   []client.Object{liveMetricsMariaDB(false)},
+			want:   true,
+		},
+		{
+			name:    "the Always policy runs the exporter when no bound class requires metrics",
+			entries: []corev1alpha1.InstanceMonitoringDestination{entry("prom", "prom")},
+			policy:  corev1alpha1.MonitoringSourcePolicyAlways,
+			objs:    []client.Object{prom, metricsClass("prometheus", false), liveMetricsMariaDB(false)},
+			want:    true,
+		},
+		{
+			name:   "the OnDemand policy runs nothing without a destination",
+			policy: corev1alpha1.MonitoringSourcePolicyOnDemand,
+			objs:   []client.Object{liveMetricsMariaDB(true)},
+		},
 		{
 			name:    "a bound class requiring metrics runs the exporter",
 			entries: []corev1alpha1.InstanceMonitoringDestination{entry("prom", "prom")},
@@ -219,7 +238,17 @@ func TestMetricsExporterRequired(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := metricsExporterRequired(monitoringContext(t, tt.entries, true, tt.objs...))
+			c := monitoringContext(t, tt.entries, true, tt.objs...)
+			if tt.policy != "" {
+				in := c.Instance()
+				if in.Spec.Monitoring == nil {
+					in.Spec.Monitoring = &corev1alpha1.InstanceMonitoringSpec{}
+				}
+				in.Spec.Monitoring.Sources = &corev1alpha1.InstanceMonitoringSources{
+					Metrics: &corev1alpha1.InstanceMetricsSource{Policy: tt.policy},
+				}
+			}
+			got, err := metricsExporterRequired(c)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})

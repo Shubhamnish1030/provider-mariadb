@@ -97,14 +97,18 @@ func buildMetrics(c *controller.Context) (*mariadbv1alpha1.MariadbMetrics, error
 	}, nil
 }
 
-// metricsExporterRequired says whether the exporter runs this pass: when a
-// bound class requires metrics or, while that is unresolved, when the live
-// MariaDB already runs it (removing and re-adding it would flap the scrape
-// for nothing).
+// metricsExporterRequired says whether the exporter runs this pass: when
+// spec.monitoring.sources.metrics.policy is Always, when a bound class
+// requires metrics or, while that is unresolved, when the live MariaDB
+// already runs it (removing and re-adding it would flap the scrape for
+// nothing). RequiredSources reports metrics Required under the Always policy.
 func metricsExporterRequired(c *controller.Context) (bool, error) {
-	// Without entries nothing is required: bindings of removed entries are
-	// ignored, so RequiredSources would answer NotRequired.
-	if m := c.Instance().Spec.Monitoring; m == nil || len(m.Destinations) == 0 {
+	// Without entries only the Always policy requires metrics: bindings of
+	// removed entries are ignored, so RequiredSources would answer
+	// NotRequired.
+	in := c.Instance()
+	if m := in.Spec.Monitoring; (m == nil || len(m.Destinations) == 0) &&
+		in.GetMetricsSourcePolicy() != corev1alpha1.MonitoringSourcePolicyAlways {
 		return false, nil
 	}
 	req, err := c.RequiredSources()

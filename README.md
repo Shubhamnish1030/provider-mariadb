@@ -292,6 +292,19 @@ operator-native integration such as PMM.
 - Once no destination requires metrics, the provider deletes the exporter
   Deployment, which the operator leaves behind.
 
+To scrape the exporter with a tool OpenEverest does not configure (a Datadog
+agent, Grafana Alloy, a hand-written `PodMonitor`), set the metrics policy to
+`Always`. The exporter then runs without any destination, and its endpoints
+are published in `status.monitoring.sources.metrics`:
+
+```yaml
+spec:
+  monitoring:
+    sources:
+      metrics:
+        policy: Always   # OnDemand (default) | Always
+```
+
 `kubectl get monitoringbindings` lists one binding per destination entry, and
 the instance's `MonitoringConfigured` condition reports whether every entry is
 configured. See [examples/instance-monitoring.yaml](examples/instance-monitoring.yaml).
