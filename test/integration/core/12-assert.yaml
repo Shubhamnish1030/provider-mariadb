@@ -5,7 +5,9 @@ kind: Instance
 metadata:
   name: test-instance
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+  (conditions[?type == 'Available'].status | [0]): "True"
 (length(status.conditions[?type == 'Ready' && status == 'True'] || `[]`) > `0`): true
 ---
 apiVersion: k8s.mariadb.com/v1alpha1

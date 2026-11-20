@@ -6,7 +6,9 @@ kind: Instance
 metadata:
   name: logical-restored
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+  (conditions[?type == 'Available'].status | [0]): "True"
   (conditions[?type == 'DataSourceReady']):
     - status: "True"
 ---

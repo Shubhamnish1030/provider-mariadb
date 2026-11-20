@@ -37,6 +37,10 @@ const (
 	standaloneFixture  = "testdata/validate/standalone.yaml"
 	galeraFixture      = "testdata/validate/galera.yaml"
 	replicationFixture = "testdata/validate/replication.yaml"
+	// reconciledVersion is the version bundle the runtime records on an
+	// Instance once the provider has reconciled it, and so may have created
+	// its engine.
+	reconciledVersion = "12.3"
 )
 
 // component applies mutate to the named component of the Instance.
@@ -377,7 +381,7 @@ func TestValidate(t *testing.T) {
 			fixture: standaloneFixture,
 			mutate: func(in *corev1alpha1.Instance) {
 				in.Spec.DataSource = instanceSeededFromPITR(backupv1alpha1.RecoveryTargetLatest, nil).Spec.DataSource
-				in.Status.Phase = corev1alpha1.InstancePhaseReady
+				in.Status.Version = reconciledVersion
 			},
 		},
 		{
@@ -428,7 +432,7 @@ func TestValidateEngineChange(t *testing.T) {
 		name    string
 		fixture string
 		before  func(*corev1alpha1.Instance)
-		phase   corev1alpha1.InstancePhase
+		pending bool
 		update  string
 		after   func(*corev1alpha1.Instance)
 		want    []string
@@ -560,7 +564,7 @@ func TestValidateEngineChange(t *testing.T) {
 		{
 			name:    "topology changed before the cluster is created",
 			fixture: standaloneFixture,
-			phase:   corev1alpha1.InstancePhasePending,
+			pending: true,
 			update:  galeraFixture,
 		},
 	}
@@ -572,7 +576,9 @@ func TestValidateEngineChange(t *testing.T) {
 			if tt.before != nil {
 				tt.before(old)
 			}
-			old.Status.Phase = cmp.Or(tt.phase, corev1alpha1.InstancePhaseReady)
+			if !tt.pending {
+				old.Status.Version = reconciledVersion
+			}
 			in := validationtest.Load(t, cmp.Or(tt.update, tt.fixture))
 			if tt.after != nil {
 				tt.after(in)

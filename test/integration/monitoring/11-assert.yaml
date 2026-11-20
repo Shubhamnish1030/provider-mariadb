@@ -5,7 +5,9 @@ kind: Instance
 metadata:
   name: test-instance-monitoring
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+  (conditions[?type == 'Available'].status | [0]): "True"
   components:
     - name: engine
       selector: core.openeverest.io/component=engine,core.openeverest.io/instance=test-instance-monitoring

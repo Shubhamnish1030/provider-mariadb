@@ -20,12 +20,14 @@ import (
 	"context"
 
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/v26/api/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	backupv1alpha1 "github.com/openeverest/openeverest/v2/api/backup/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-mariadb/definition/backupclasses"
@@ -56,6 +58,8 @@ func New() *MariaDBProvider {
 				mariadbv1alpha1.AddToScheme,
 				// Registered so the Backup mirror can watch run Jobs.
 				batchv1.AddToScheme,
+				// StatefulSets tell whether the database has rolled out.
+				appsv1.AddToScheme,
 			},
 			WatchConfigs: []controller.WatchConfig{
 				// Re-enqueue the Instance when its owned MariaDB CR changes
@@ -67,6 +71,19 @@ func New() *MariaDBProvider {
 				// Re-enqueue when MaxScale changes so the Instance status
 				// tracks proxy readiness.
 				controller.WatchOwned(&mariadbv1alpha1.MaxScale{}),
+				// Re-enqueue when a Restore changes so the Instance stops
+				// reporting it as soon as it reaches a terminal state. Restores
+				// are not owned by the Instance, so map them via
+				// spec.instanceRef.
+				controller.WatchExternal(&backupv1alpha1.Restore{},
+					handler.EnqueueRequestsFromMapFunc(enqueueRestoreInstance()),
+				),
+				// Re-enqueue when a StatefulSet rolls out: the operator can
+				// report ready before it has. They are owned by the operator's
+				// objects, so map them by their owner.
+				controller.WatchExternal(&appsv1.StatefulSet{},
+					handler.EnqueueRequestsFromMapFunc(enqueueStatefulSetInstance()),
+				),
 			},
 		},
 	}

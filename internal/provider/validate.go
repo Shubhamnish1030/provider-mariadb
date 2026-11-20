@@ -305,9 +305,13 @@ func validateDataSource(in *corev1alpha1.Instance) field.ErrorList {
 	)}
 }
 
-// provisioned reports whether the Instance got past validation, so its engine may exist.
+// provisioned reports whether the provider has reconciled the Instance
+// before, and so may have created its engine. The runtime records the version
+// bundle it applies the first time a reconcile gets through the provider, and
+// keeps it from then on. The phase does not tell: an Instance stays Pending
+// until its database is first available, long after its pods were started.
 func provisioned(in *corev1alpha1.Instance) bool {
-	return in != nil && in.Status.Phase != "" && in.Status.Phase != corev1alpha1.InstancePhasePending
+	return in != nil && in.Status.Version != ""
 }
 
 // engineState is what an engine runs, to check an update against.

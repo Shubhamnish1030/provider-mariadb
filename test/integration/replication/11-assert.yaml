@@ -1,13 +1,15 @@
 # Expected outcome of the cluster-running step: once the real mariadb-operator
-# bootstraps the 3-node replication cluster, the provider's Status() surfaces
-# phase Ready and the runtime publishes connection details pointing at the
+# bootstraps the 3-node replication cluster, the Instance is Ready and
+# Available and the runtime publishes connection details pointing at the
 # primary Service. The MariaDB CR reports an elected primary.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
   name: test-replication
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+  (conditions[?type == 'Available'].status | [0]): "True"
 ---
 # The operator elects a primary and records it in the MariaDB status; a
 # non-empty currentPrimary proves replication was configured.

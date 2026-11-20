@@ -66,3 +66,4 @@ package provider
 
 // Jobs — mirror scheduled backup runs (CronJob-produced Jobs) into Backup CRs.
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch
