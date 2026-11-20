@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/mariadb-operator/mariadb-operator/v26 v26.10.2
-	github.com/openeverest/openeverest/v2 v2.0.0-dev.2.0.20261120074638-39a18ede0113
+	github.com/openeverest/openeverest/v2 v2.0.0-alpha.1
 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.91.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.12.1
@@ -109,7 +109,7 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
-	github.com/openeverest/provider-sdk v0.3.1-0.20261117185841-9daa99317188 // indirect
+	github.com/openeverest/provider-sdk v0.4.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
