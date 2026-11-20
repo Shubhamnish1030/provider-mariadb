@@ -5,9 +5,10 @@
 # ExtensionManaged prometheus binding turns the mysqld-exporter on and
 # publishes one metrics endpoint per MariaDB pod, replacing prometheus with
 # victoriametrics keeps the exporter and endpoints, and dropping the last
-# entry turns the exporter off and deletes its Deployment. No extension
-# controller runs here, so the classes are claimed by hand and the bindings are
-# never Configured; what the provider owns is asserted.
+# entry turns the exporter off and deletes its Deployment. The Always metrics
+# policy then runs the exporter without a destination, and OnDemand stops it.
+# No extension controller runs here, so the classes are claimed by hand and the
+# bindings are never Configured; what the provider owns is asserted.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -17,7 +18,8 @@ spec:
     Bind an Instance to a class requiring metrics, verify the MariaDB CR runs
     the exporter without a ServiceMonitor and the Instance publishes the probe
     endpoints, switch to another such class, drop the destinations and verify
-    the exporter is torn down, then delete the Instance.
+    the exporter is torn down, run it again with the Always metrics policy and
+    stop it with OnDemand, then delete the Instance.
 
   # Collect diagnostics when a step fails.
   catch:
@@ -99,6 +101,29 @@ spec:
             file: 20-assert.yaml
         - error:
             file: 20-errors.yaml
+
+    # spec.monitoring.sources.metrics.policy: Always runs the exporter for
+    # scrapers OpenEverest does not configure, without any destination.
+    - name: metrics-policy-always
+      timeouts:
+        assert: 4m
+      try:
+        - apply:
+            file: 30-metrics-always.yaml
+        - assert:
+            file: 30-assert.yaml
+
+    - name: metrics-policy-on-demand
+      timeouts:
+        assert: 2m
+        error: 2m
+      try:
+        - apply:
+            file: 31-metrics-on-demand.yaml
+        - assert:
+            file: 31-assert.yaml
+        - error:
+            file: 31-errors.yaml
 
     - name: delete-instance
       try:

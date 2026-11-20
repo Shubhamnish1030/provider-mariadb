@@ -1,0 +1,5 @@
+# The provider deletes the exporter the operator leaves behind.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-instance-monitoring-metrics
