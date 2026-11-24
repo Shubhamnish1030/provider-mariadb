@@ -156,6 +156,7 @@ spec:
               token=$(kubectl -n "$NAMESPACE" get instance tls-managed \
                 -o jsonpath='{.status.pendingMaintenance[0].approvalToken}')
               echo "approving $token"
+              pod=$(kubectl -n "$NAMESPACE" get pod tls-managed-0 -o jsonpath='{.metadata.uid}')
               kubectl -n "$NAMESPACE" patch instance tls-managed --type=merge \
                 -p "{\"spec\":{\"maintenance\":{\"approved\":\"$token\"}}}"
               i=0
@@ -166,6 +167,13 @@ spec:
                 sleep 5
               done
               echo "certificate reissued for db.example.test"
+              # The operator restarts the pod to serve the new certificate.
+              i=0
+              until [ "$(kubectl -n "$NAMESPACE" get pod tls-managed-0 -o jsonpath='{.metadata.uid}' 2>/dev/null)" != "$pod" ]; do
+                i=$((i + 1))
+                [ "$i" -lt 60 ] || { echo "FAIL: pod not restarted"; exit 1; }
+                sleep 5
+              done
               kubectl -n "$NAMESPACE" wait --for=condition=Ready mariadb/tls-managed --timeout=6m
               "$PROVIDER_ROOT_PATH/test/integration/tls/connect.sh" tls-managed verify
         - assert:
@@ -175,4 +183,4 @@ spec:
               metadata:
                 name: tls-managed
               status:
-                (pendingMaintenance[?starts_with(approvalToken, 'tls-names-')] | length(@)): 0
+                (length(pendingMaintenance[?starts_with(approvalToken, 'tls-names-')] || `[]`)): 0
