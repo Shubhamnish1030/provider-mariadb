@@ -290,13 +290,13 @@ func TestValidate(t *testing.T) {
 			name:    "old TLS fields",
 			fixture: standaloneFixture,
 			mutate:  tlsParameters(`{"required":true}`),
-			want:    []string{"spec.parameters"},
+			want:    []string{"spec.parameters.tls.required"},
 		},
 		{
 			name:    "TLS in the engine parameters",
 			fixture: standaloneFixture,
 			mutate:  parameters(common.ComponentEngine, `{"tls":{"required":true}}`),
-			want:    []string{"spec.components[engine].parameters"},
+			want:    []string{"spec.components[engine].parameters.tls"},
 		},
 		{
 			name:    "TLS settings from the UI",

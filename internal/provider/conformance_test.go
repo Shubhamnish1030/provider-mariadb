@@ -29,9 +29,13 @@ import (
 
 // The probes set one field at a time, and some fields only apply while another
 // one is enabled: proxy fields need spec.components.proxy.parameters.enabled.
+// Other entries take values the probes cannot generate.
 var gatedPaths = map[string]string{
 	"spec.components.proxy.replicas":            "applied only while the proxy is enabled",
 	"spec.components.proxy.service.serviceType": "applied only while the proxy is enabled",
+	// The probe can only set an invented string, which Validate rejects;
+	// TestBuildTLS covers every mode.
+	"spec.parameters.tls.mode": "takes one of a fixed set of values",
 }
 
 func TestUISchemaIsReconciled(t *testing.T) {

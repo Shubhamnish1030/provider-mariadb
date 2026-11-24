@@ -96,12 +96,9 @@ func certSecret(name string, crt, key, ca []byte) *corev1.Secret {
 	}
 }
 
-// standaloneNames and replicationNames are the names the instance "test" in
-// "default" must be valid for.
-var (
-	standaloneNames  = []string{"test.default.svc.cluster.local", "test.default.svc"}
-	replicationNames = []string{"test-primary.default.svc.cluster.local", "test-primary.default.svc", "*.test-internal.default.svc.cluster.local"}
-)
+// standaloneNames are the names the standalone instance "test" in "default"
+// must be valid for.
+var standaloneNames = []string{"test.default.svc.cluster.local", "test.default.svc"}
 
 func TestCheckCertificateSecret(t *testing.T) {
 	ca := newTestCA(t)
@@ -134,6 +131,12 @@ func TestCheckCertificateSecret(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.want)
 		})
 	}
+
+	wildcard, wildcardKey := ca.issue(t, x509.ExtKeyUsageServerAuth,
+		"test-primary.default.svc.cluster.local", "test-primary.default.svc", "*.test-internal.default.svc.cluster.local")
+	assert.NoError(t, checkCertificateSecret(certSecret("s", wildcard, wildcardKey, ca.pem), []string{
+		"test-primary.default.svc.cluster.local", "test-0.test-internal.default.svc.cluster.local",
+	}), "a wildcard covers the pod names")
 }
 
 func TestRequiredTLSNames(t *testing.T) {
@@ -261,12 +264,11 @@ func TestApproveAdditionalNames(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := newTLSContext(t, "", `{"tls":{"additionalNames":["db.example.com"]}}`)
+			c := newTLSContext(t, "", "")
 			if tt.approved != nil {
 				c.Instance().Spec.Maintenance = tt.approved(additionalNamesToken(names))
 			}
-			desired, err := desiredMariaDB(c)
-			require.NoError(t, err)
+			desired := mariaDBWithTLS(&mariadbv1alpha1.TLS{Enabled: true, ServerCertAdditionalNames: names})
 			approveAdditionalNames(c, mariaDBWithTLS(tt.existing), desired)
 
 			assert.Equal(t, tt.wantNames, desired.Spec.TLS.ServerCertAdditionalNames)
