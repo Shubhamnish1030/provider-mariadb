@@ -69,7 +69,7 @@ provider itself is covered under [Installation](#installation).
 | Custom configuration | ✅ | `my.cnf` via the engine component's `configuration` parameter |
 | Monitoring | ✅ | any metrics backend through `mysqld-exporter`, via `spec.monitoring.destinations` — see [Monitoring](#monitoring) |
 | Pod scheduling | ✅ | `spec.components.{engine,proxy}.schedulingPolicy` — `affinity` (`nodeAffinity` and `podAntiAffinity`; `podAffinity` is rejected), `nodeSelector`, `tolerations` and `topologySpreadConstraints`; `schedulerName` is not supported. A set `affinity` replaces the HA default soft anti-affinity, `{}` sets none |
-| TLS | ✅ | enabled by default with operator-managed certificates; CA is published in the connection Secret |
+| TLS | ✅ | `spec.parameters.tls`: on by default; certificates from the operator's CA, a cert-manager issuer or your own Secret; CA published in the connection Secret |
 
 Stateful workloads additionally report:
 
@@ -183,23 +183,109 @@ the operator does not restart replicas' replication after a Pod restart. A
 replication connection you create yourself on these topologies must be
 started again (`START SLAVE`) after a restart.
 
-TLS is enabled by default. The same connection Secret contains `tls: "true"`
-and the operator-generated CA bundle under `ca.crt`, allowing clients to verify
-the MariaDB server certificate. Unencrypted connections remain accepted by
-default for migration compatibility. To reject them, set:
+### TLS
+
+TLS is configured for the whole instance under `spec.parameters.tls`, with
+the shape every OpenEverest provider shares:
 
 ```yaml
 spec:
-  components:
-    engine:
-      parameters:
-        tls:
-          required: true
+  parameters:
+    tls:
+      mode: requireTLS            # disabled | preferTLS (default) | requireTLS
+      issuer:                     # optional: a cert-manager issuer signs the server certificate
+        name: company-ca
+        kind: ClusterIssuer       # Issuer (default) or ClusterIssuer; any kind with group
+        # group: awspca.cert-manager.io
+      additionalNames:            # optional: extra DNS names for the certificate
+        - mariadb.example.com
+      # certificateSecretName: my-db-tls   # or: your own certificate, instead of issuer
+      galeraSSTEnabled: true      # galera only; on by default
 ```
 
-TLS can be explicitly disabled with `tls.enabled: false`. Galera deployments
-also encrypt state snapshot transfers by default; this can be changed with
-`tls.galeraSSTEnabled`. See [examples/instance-tls.yaml](examples/instance-tls.yaml).
+| Field | Meaning |
+| --- | --- |
+| `mode` | `preferTLS` (default) serves TLS and still accepts unencrypted clients; `requireTLS` rejects them (`require_secure_transport`) at MariaDB and at MaxScale; `disabled` turns TLS off, and can only be set when the instance is created. Changing the mode restarts the pods one at a time. |
+| `certificateSecretName` | A Secret in the instance namespace with the server certificate and any intermediate CA certificates (`tls.crt`), its key (`tls.key`) and the CA certificate (`ca.crt`). Doesn't need cert-manager. |
+| `issuer` | A cert-manager issuer that signs the server certificate; the operator requests it as the Certificate `<name>-server-cert` and cert-manager renews it. The issuer must write its CA certificate to `ca.crt`, as the CA and Vault issuers do (ACME issuers don't). |
+| `additionalNames` | DNS names (no IP addresses) the certificate is valid for besides the instance's Services and pods. Used with `issuer` or the operator's CA, not with `certificateSecretName`. |
+| `galeraSSTEnabled` | Encrypt Galera state snapshot transfers. Defaults to on for `galera` with TLS on; ignored on the other topologies. |
+
+The server certificate comes, in order of precedence, from
+`certificateSecretName`, `issuer`, or else a CA the mariadb-operator creates
+for the instance. Client certificates (replication, Galera SST, MaxScale)
+always come from the operator's CA.
+
+- TLS can be turned on later, but not off once it is on.
+- `certificateSecretName` and `issuer` are chosen when TLS is turned on and
+  can't change while it is on: replicas and clients trust the CA of the
+  certificate.
+- Changing `additionalNames` reissues the certificate and restarts the pods,
+  so on a running instance it waits for maintenance approval: the change shows
+  in `status.pendingMaintenance` with a `tls-names-…` token, applied once you
+  set it in `spec.maintenance.approved` (or with
+  `spec.maintenance.autoApproveUpTo: RollingRestart`).
+- The mariadb-operator restarts the pods, one at a time, whenever the server
+  certificate changes, including when cert-manager renews it or you update
+  your Secret.
+
+The connection Secret contains `tls: "true"` and, under `ca.crt`, the CA bundle
+clients verify the server with: the CA of the server certificate plus the
+operator's CA. Connect with `--ssl-verify-server-cert` (`sslMode=VERIFY_IDENTITY`)
+to the `host` it publishes.
+
+#### Bring your own CA
+
+With a cert-manager issuer for your company CA, set `issuer`; see
+[examples/instance-tls.yaml](examples/instance-tls.yaml). Without
+cert-manager, put the certificate in a Secret and set `certificateSecretName`:
+
+```sh
+kubectl create secret generic my-db-tls -n <namespace> \
+  --from-file=tls.crt=server-chain.pem --from-file=tls.key=server-key.pem \
+  --from-file=ca.crt=company-ca.pem
+```
+
+The operator, its probes and the replicas verify the certificate by name, so
+it must be valid for:
+
+- `<svc>.<namespace>.svc.cluster.local` and `<svc>.<namespace>.svc`, where
+  `<svc>` is `<name>` for `standalone` and `<name>-primary` for `galera` and
+  `replication`;
+- for `galera` and `replication`, the pods:
+  `*.<name>-internal.<namespace>.svc.cluster.local`;
+- `localhost`, which the operator's probes connect to;
+- any other name clients connect to.
+
+The provider checks the Secret (keys, key pair, that `ca.crt` verifies the
+certificate for server authentication, and the names above) and reports a
+problem on the Instance. Updating the Secret rolls the new certificate out.
+
+#### Migrating from the engine parameters
+
+Earlier releases configured TLS under
+`spec.components.engine.parameters.tls`. Those fields are gone, and an
+Instance that still sets them fails validation until it is migrated:
+
+| Before | After |
+| --- | --- |
+| `tls.enabled: false` | `spec.parameters.tls.mode: disabled` |
+| `tls.enabled: true` (or unset), `tls.required: false` (or unset) | `mode: preferTLS` (or nothing) |
+| `tls.required: true` | `mode: requireTLS` |
+| `tls.galeraSSTEnabled` | `spec.parameters.tls.galeraSSTEnabled` |
+
+For example, for an instance that required TLS:
+
+```sh
+kubectl patch instance <name> -n <namespace> --type=json -p '[
+  {"op": "remove", "path": "/spec/components/engine/parameters/tls"},
+  {"op": "add", "path": "/spec/parameters", "value": {"tls": {"mode": "requireTLS"}}}
+]'
+```
+
+(Use `"op": "add", "path": "/spec/parameters/tls"` when the Instance already
+has `spec.parameters`.) The MariaDB keeps running unchanged through the
+migration.
 
 ### Status
 
@@ -337,7 +423,7 @@ spec:
 
 While the proxy is enabled, the connection Secret points at the MaxScale
 Service (`<name>-maxscale`) with the same credentials. MaxScale terminates TLS
-only when the engine requires it (`tls.required: true`); the connection Secret
+only when the instance requires it (`spec.parameters.tls.mode: requireTLS`); the connection Secret
 then carries the MaxScale CA. Setting `enabled: false` removes MaxScale. See
 [examples/instance-maxscale.yaml](examples/instance-maxscale.yaml).
 

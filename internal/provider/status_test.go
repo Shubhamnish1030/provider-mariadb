@@ -188,11 +188,11 @@ func (sc *statusCluster) context(t *testing.T) *controller.Context {
 			Topology: &corev1alpha1.TopologySpec{Type: sc.topology},
 			Components: map[string]corev1alpha1.ComponentSpec{
 				common.ComponentEngine: {
-					Type:       common.ComponentTypeMariaDB,
-					Replicas:   ptr.To(sc.replicas),
-					Parameters: &runtime.RawExtension{Raw: []byte(`{"tls":{"enabled":false}}`)},
+					Type:     common.ComponentTypeMariaDB,
+					Replicas: ptr.To(sc.replicas),
 				},
 			},
+			Parameters: &runtime.RawExtension{Raw: []byte(`{"tls":{"mode":"disabled"}}`)},
 		},
 	}
 	if sc.proxy {

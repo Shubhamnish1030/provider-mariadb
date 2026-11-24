@@ -8,7 +8,8 @@
 # While the proxy is enabled, the connection details in the generated Secret
 # point at the MaxScale Service (<name>-maxscale). MaxScale authenticates
 # clients against the same MariaDB users, so the credentials are unchanged.
-# MaxScale only terminates TLS when the engine requires it (tls.required: true);
+# MaxScale only terminates TLS when the instance requires it
+# (spec.parameters.tls.mode: requireTLS);
 # its CA is then published in the connection Secret instead of the MariaDB one.
 #
 # Disabling the proxy (enabled: false) removes MaxScale.

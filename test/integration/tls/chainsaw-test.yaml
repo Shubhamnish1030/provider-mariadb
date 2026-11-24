@@ -1,0 +1,186 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+# TLS through spec.parameters.tls: the operator's CA with TLS required, a
+# company CA through a cert-manager issuer with an additional name, and the
+# user's own certificate Secret on replication. Clients verify every server
+# with the ca.crt of the connection Secret. TLS cannot be turned off and the
+# certificate source cannot change; changing additionalNames waits for
+# maintenance approval, then reissues the certificate.
+#
+# Installs cert-manager when the cluster has none.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: tls
+spec:
+  timeouts:
+    cleanup: 3m
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get instance,mariadb,certificate,pods -o wide
+    - script:
+        content: kubectl -n $NAMESPACE get instance -o yaml
+    - script:
+        content: |
+          ns=$(kubectl get deploy -A -l app.kubernetes.io/name=provider-mariadb \
+            -o jsonpath='{.items[0].metadata.namespace}')
+          [ -n "$ns" ] && kubectl -n "$ns" logs -l app.kubernetes.io/name=provider-mariadb \
+            --all-containers --tail 100 || echo "provider deployment not found"
+
+  steps:
+    - name: install-cert-manager
+      try:
+        - script:
+            timeout: 5m
+            content: |
+              set -eu
+              if ! kubectl get crd certificates.cert-manager.io >/dev/null 2>&1; then
+                kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.3/cert-manager.yaml
+              fi
+              kubectl wait --for=condition=Available deploy --all -n cert-manager --timeout=180s
+
+    - name: create-ca-and-own-certificate
+      try:
+        - apply:
+            file: 00-ca.yaml
+        - script:
+            timeout: 3m
+            content: |
+              set -eu
+              kubectl wait --for=condition=Ready certificate/test-ca -n "$NAMESPACE" --timeout=90s
+              kubectl wait --for=condition=Ready issuer/databases-ca -n "$NAMESPACE" --timeout=60s
+              # Valid for the primary Service clients and the operator connect
+              # to, and for the pods the replicas replicate from.
+              kubectl apply -n "$NAMESPACE" -f - <<YAML
+              apiVersion: cert-manager.io/v1
+              kind: Certificate
+              metadata:
+                name: own-tls
+              spec:
+                secretName: own-tls
+                commonName: tls-own-primary
+                dnsNames:
+                  - tls-own-primary.$NAMESPACE.svc.cluster.local
+                  - tls-own-primary.$NAMESPACE.svc
+                  - "*.tls-own-internal.$NAMESPACE.svc.cluster.local"
+                  - localhost
+                usages: [digital signature, key encipherment, server auth, client auth]
+                issuerRef:
+                  name: databases-ca
+                  kind: Issuer
+              YAML
+              kubectl wait --for=condition=Ready certificate/own-tls -n "$NAMESPACE" --timeout=90s
+
+    - name: create-instances
+      try:
+        - apply:
+            file: 10-create-instances.yaml
+
+    - name: instances-running
+      timeouts:
+        assert: 10m
+      try:
+        - assert:
+            file: 11-assert.yaml
+
+    - name: clients-verify-the-servers
+      timeouts:
+        exec: 3m
+      try:
+        - script:
+            content: |
+              set -eu
+              for instance in tls-managed tls-issuer tls-own; do
+                "$PROVIDER_ROOT_PATH/test/integration/tls/connect.sh" "$instance" verify
+              done
+              "$PROVIDER_ROOT_PATH/test/integration/tls/connect.sh" tls-managed plain
+
+    # Turning TLS off and changing the certificate source are refused.
+    - name: tls-off-and-source-change-refused
+      try:
+        - script:
+            content: |
+              set -u
+              refused() {
+                if out=$(kubectl -n "$NAMESPACE" patch instance "$1" --type=merge -p "$2" 2>&1); then
+                  echo "FAIL: $1 accepted $2: $out"; exit 1
+                fi
+                echo "$out" | grep -q "$3" || { echo "FAIL: unexpected error: $out"; exit 1; }
+                echo "refused: $out"
+              }
+              refused tls-own '{"spec":{"parameters":{"tls":{"mode":"disabled","certificateSecretName":null}}}}' "cannot be turned off"
+              refused tls-issuer '{"spec":{"parameters":{"tls":{"issuer":null}}}}' "cannot change while TLS is on"
+              refused tls-managed '{"spec":{"parameters":{"tls":{"issuer":{"name":"databases-ca"}}}}}' "cannot change while TLS is on"
+
+    # A new additional name waits for approval: reissuing the certificate
+    # restarts the pods. Once approved, the operator's CA issues a certificate
+    # with the name and clients still verify the server.
+    - name: additional-names-wait-for-approval
+      try:
+        - patch:
+            resource:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              metadata:
+                name: tls-managed
+              spec:
+                parameters:
+                  tls:
+                    additionalNames:
+                      - db.example.test
+        - assert:
+            resource:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              metadata:
+                name: tls-managed
+              status:
+                (pendingMaintenance[?starts_with(approvalToken, 'tls-names-')] | length(@)): 1
+                (pendingMaintenance[?starts_with(approvalToken, 'tls-names-')].severity | [0]): RollingRestart
+        - assert:
+            resource:
+              apiVersion: k8s.mariadb.com/v1alpha1
+              kind: MariaDB
+              metadata:
+                name: tls-managed
+              spec:
+                tls:
+                  (serverCertAdditionalNames == null): true
+
+    - name: additional-names-approved
+      timeouts:
+        exec: 8m
+      try:
+        - script:
+            content: |
+              set -eu
+              token=$(kubectl -n "$NAMESPACE" get instance tls-managed \
+                -o jsonpath='{.status.pendingMaintenance[0].approvalToken}')
+              echo "approving $token"
+              pod=$(kubectl -n "$NAMESPACE" get pod tls-managed-0 -o jsonpath='{.metadata.uid}')
+              kubectl -n "$NAMESPACE" patch instance tls-managed --type=merge \
+                -p "{\"spec\":{\"maintenance\":{\"approved\":\"$token\"}}}"
+              i=0
+              until kubectl -n "$NAMESPACE" get secret tls-managed-server-cert -o jsonpath='{.data.tls\.crt}' 2>/dev/null \
+                  | base64 -d | openssl x509 -noout -ext subjectAltName 2>/dev/null | grep -q 'DNS:db.example.test'; do
+                i=$((i + 1))
+                [ "$i" -lt 60 ] || { echo "FAIL: certificate not reissued for db.example.test"; exit 1; }
+                sleep 5
+              done
+              echo "certificate reissued for db.example.test"
+              # The operator restarts the pod to serve the new certificate.
+              i=0
+              until [ "$(kubectl -n "$NAMESPACE" get pod tls-managed-0 -o jsonpath='{.metadata.uid}' 2>/dev/null)" != "$pod" ]; do
+                i=$((i + 1))
+                [ "$i" -lt 60 ] || { echo "FAIL: pod not restarted"; exit 1; }
+                sleep 5
+              done
+              kubectl -n "$NAMESPACE" wait --for=condition=Ready mariadb/tls-managed --timeout=6m
+              "$PROVIDER_ROOT_PATH/test/integration/tls/connect.sh" tls-managed verify
+        - assert:
+            resource:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              metadata:
+                name: tls-managed
+              status:
+                (length(pendingMaintenance[?starts_with(approvalToken, 'tls-names-')] || `[]`)): 0

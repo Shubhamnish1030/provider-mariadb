@@ -1,0 +1,86 @@
+# Every instance is ready, serves the certificate of its source and publishes
+# the CA clients verify it with.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: tls-managed
+status:
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: tls-issuer
+status:
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: tls-own
+status:
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
+---
+apiVersion: k8s.mariadb.com/v1alpha1
+kind: MariaDB
+metadata:
+  name: tls-managed
+spec:
+  tls:
+    enabled: true
+    required: true
+    (serverCertSecretRef == null): true
+    (serverCertIssuerRef == null): true
+---
+apiVersion: k8s.mariadb.com/v1alpha1
+kind: MariaDB
+metadata:
+  name: tls-issuer
+spec:
+  tls:
+    enabled: true
+    required: false
+    serverCertIssuerRef:
+      name: databases-ca
+      kind: Issuer
+      group: cert-manager.io
+    serverCertAdditionalNames:
+      - db.example.test
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tls-issuer-server-cert
+spec:
+  issuerRef:
+    name: databases-ca
+  (contains(dnsNames, 'db.example.test')): true
+---
+apiVersion: k8s.mariadb.com/v1alpha1
+kind: MariaDB
+metadata:
+  name: tls-own
+spec:
+  tls:
+    enabled: true
+    serverCertSecretRef:
+      name: own-tls
+    serverCASecretRef:
+      name: own-tls
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tls-issuer-conn
+(base64_decode(data.tls) == 'true'): true
+(base64_decode(data."ca.crt") != ''): true
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tls-own-conn
+(base64_decode(data.tls) == 'true'): true
+(base64_decode(data."ca.crt") != ''): true

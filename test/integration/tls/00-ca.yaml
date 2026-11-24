@@ -1,0 +1,30 @@
+# A company CA: a self-signed root that a cert-manager CA Issuer signs with.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-ca
+spec:
+  isCA: true
+  commonName: Test company CA
+  secretName: test-ca
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: databases-ca
+spec:
+  ca:
+    secretName: test-ca

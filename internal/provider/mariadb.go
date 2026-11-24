@@ -120,6 +120,7 @@ func SyncMariaDB(c *controller.Context) error {
 		// Immutable once set: keep declaring them so the apply never removes them.
 		desired.Spec.BootstrapFrom = existing.Spec.BootstrapFrom
 		desired.Spec.Storage.StorageClassName = existing.Spec.Storage.StorageClassName
+		approveAdditionalNames(c, existing, desired)
 	}
 
 	obj, err := toApplyObject(c, desired)
@@ -128,6 +129,11 @@ func SyncMariaDB(c *controller.Context) error {
 	}
 	if err := c.Apply(obj); err != nil {
 		return fmt.Errorf("apply MariaDB: %w", err)
+	}
+	// After the apply, so the operator issues the new certificate for the
+	// names just declared.
+	if err := reissueServerCertificate(c, desired, existing.UID); err != nil {
+		return err
 	}
 	return rotateCopiedRootPassword(c)
 }

@@ -54,37 +54,6 @@ spec:
                 `configuration` is the conventional engine-config property name across providers;
                 the content is passed verbatim to the operator's spec.myCnf field.
               type: string
-            tls:
-              description: |-
-                TLS configures transport encryption for MariaDB. TLS is enabled by
-                default when this block or its enabled field is omitted.
-              properties:
-                enabled:
-                  description: Enabled controls certificate issuance and TLS support. Defaults to true.
-                  enum:
-                    - true
-                    - false
-                    - "true"
-                    - "false"
-                galeraSSTEnabled:
-                  description: |-
-                    GaleraSSTEnabled encrypts Galera state snapshot transfers. It defaults to
-                    true for Galera instances and is not valid for standalone instances.
-                  enum:
-                    - true
-                    - false
-                    - "true"
-                    - "false"
-                required:
-                  description: |-
-                    Required rejects unencrypted client connections. Defaults to false so
-                    existing username/password clients can migrate to TLS without disruption.
-                  enum:
-                    - true
-                    - false
-                    - "true"
-                    - "false"
-              type: object
           type: object
       type: mariadb
     proxy:
@@ -114,6 +83,84 @@ spec:
     componentTypes:
       mariadb:
         metrics: Exporter
+  parametersSchema:
+    openAPIV3Schema:
+      description: |-
+        Parameters defines instance-wide structured parameters that apply to the
+        entire cluster (Instance.spec.parameters).
+      properties:
+        tls:
+          description: |-
+            TLS configures encryption in transit: between clients and MariaDB,
+            between the replicas, and between Galera nodes.
+          properties:
+            additionalNames:
+              description: |-
+                AdditionalNames are DNS names the server certificate is valid for
+                besides those of the instance's Services and pods, such as an external
+                name clients connect to. Used with issuer or the operator's CA; cannot
+                be combined with certificateSecretName, whose certificate carries its
+                own names. Changing them on a running instance reissues the
+                certificate and restarts the pods, so it waits for maintenance
+                approval.
+              items:
+                type: string
+              type: array
+            certificateSecretName:
+              description: |-
+                CertificateSecretName names a Secret in the instance namespace with the
+                server certificate, followed by any intermediate CA certificates
+                (tls.crt), its private key (tls.key) and the CA certificate it is
+                verified with (ca.crt). The certificate must be valid for the names of
+                the instance's Services and, for galera and replication, of its pods
+                (*.<instance>-internal.<namespace>.svc.cluster.local), for localhost,
+                which the operator's probes connect to, and for the names clients
+                connect to. Does not need cert-manager. Cannot be
+                combined with issuer or additionalNames.
+              type: string
+            galeraSSTEnabled:
+              description: |-
+                GaleraSSTEnabled encrypts Galera state snapshot transfers. Defaults to
+                true on the galera topology; ignored on the others.
+              enum:
+                - true
+                - false
+                - "true"
+                - "false"
+            issuer:
+              description: |-
+                Issuer is the cert-manager issuer that signs the server certificate,
+                instead of the CA the mariadb-operator creates. The operator requests
+                it as the Certificate <instance>-server-cert and cert-manager renews
+                it. The issuer must write its CA certificate to ca.crt, as the CA and
+                Vault issuers do.
+              properties:
+                group:
+                  default: cert-manager.io
+                  description: |-
+                    Group is the API group of an external issuer, such as
+                    awspca.cert-manager.io.
+                  type: string
+                kind:
+                  default: Issuer
+                  description: |-
+                    Kind of the issuer: Issuer or ClusterIssuer, or the kind of an
+                    external issuer of group.
+                  type: string
+                name:
+                  description: Name of the issuer.
+                  type: string
+              required:
+                - name
+              type: object
+            mode:
+              default: preferTLS
+              description: |-
+                Mode is disabled, preferTLS or requireTLS. Changing it restarts the
+                pods, one at a time. TLS cannot be turned off on an existing instance.
+              type: string
+          type: object
+      type: object
   release:
     version: 0.1.0
   topologies:
@@ -386,46 +433,95 @@ spec:
           label: Resources
         security:
           components:
+            certificates:
+              components:
+                certificateSecretName:
+                  fieldParams:
+                    helperText: Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Services (such as <name>-primary.<namespace>.svc) and pods (*.<name>-internal.<namespace>.svc.cluster.local) and localhost.
+                    label: Certificate secret
+                    modes:
+                      edit:
+                        disabled: true
+                  path: spec.parameters.tls.certificateSecretName
+                  uiType: text
+                  validation:
+                    regex:
+                      message: Must be a valid Kubernetes object name (lowercase letters, digits, '-' and '.')
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                issuer:
+                  components:
+                    issuerKind:
+                      fieldParams:
+                        helperText: Issuer when not set
+                        label: Issuer kind
+                        modes:
+                          edit:
+                            disabled: true
+                        options:
+                          - label: Issuer
+                            value: Issuer
+                          - label: ClusterIssuer
+                            value: ClusterIssuer
+                      path: spec.parameters.tls.issuer.kind
+                      uiType: select
+                    issuerName:
+                      fieldParams:
+                        helperText: Issuer that signs the server certificate. It must write its CA certificate (ca.crt), as CA and Vault issuers do. Needs cert-manager.
+                        label: cert-manager issuer
+                        modes:
+                          edit:
+                            disabled: true
+                      path: spec.parameters.tls.issuer.name
+                      uiType: text
+                      validation:
+                        celExpressions:
+                          - celExpr: '!has(spec.parameters) || !has(spec.parameters.tls) || !has(spec.parameters.tls.issuer) || !has(spec.parameters.tls.issuer.name) || spec.parameters.tls.issuer.name == '''' || !has(spec.parameters.tls.certificateSecretName) || spec.parameters.tls.certificateSecretName == '''''
+                            message: Use either an issuer or a certificate secret, not both
+                          - celExpr: '!has(spec.parameters) || !has(spec.parameters.tls) || !has(spec.parameters.tls.issuer) || !has(spec.parameters.tls.issuer.kind) || spec.parameters.tls.issuer.kind == '''' || (has(spec.parameters.tls.issuer.name) && spec.parameters.tls.issuer.name != '''')'
+                            message: Name the issuer
+                  componentsOrder:
+                    - issuerName
+                    - issuerKind
+                  groupType: line
+                  uiType: group
+              componentsOrder:
+                - issuer
+                - certificateSecretName
+              description: Leave empty to have the mariadb-operator issue the server certificate from a CA it creates for the instance. Clients verify the server with the CA certificate the connection secret holds as ca.crt. Can't be changed while TLS is on.
+              groupType: bordered
+              label: Certificates
+              uiType: group
             galeraSSTEnabled:
               fieldParams:
-                defaultValue: "true"
+                helperText: Enabled when not set and TLS is on
                 label: Encrypt Galera state transfers
                 options:
                   - label: Enabled
                     value: "true"
                   - label: Disabled
                     value: "false"
-              path: spec.components.engine.parameters.tls.galeraSSTEnabled
+              path: spec.parameters.tls.galeraSSTEnabled
               uiType: select
-            tlsEnabled:
+            mode:
               fieldParams:
-                defaultValue: "true"
-                label: Enable TLS
+                defaultValue: preferTLS
+                helperText: Required rejects clients that do not use TLS, at MariaDB and MaxScale; enable it once all clients trust the CA of the connection secret. Changing the mode restarts the pods one at a time. TLS can't be turned off after the instance is created.
+                label: TLS mode
                 options:
-                  - label: Enabled
-                    value: "true"
+                  - label: 'Preferred: clients choose whether to use TLS'
+                    value: preferTLS
+                  - label: 'Required: clients must use TLS'
+                    value: requireTLS
                   - label: Disabled
-                    value: "false"
-              path: spec.components.engine.parameters.tls.enabled
-              uiType: select
-            tlsRequired:
-              fieldParams:
-                defaultValue: "false"
-                helperText: Reject clients that do not connect using TLS. Enable only after all clients trust the published CA.
-                label: Require encrypted connections
-                options:
-                  - label: Optional
-                    value: "false"
-                  - label: Required
-                    value: "true"
-              path: spec.components.engine.parameters.tls.required
+                    value: disabled
+              path: spec.parameters.tls.mode
               uiType: select
           componentsOrder:
-            - tlsEnabled
-            - tlsRequired
+            - mode
             - galeraSSTEnabled
-          description: Configure encryption for MariaDB client traffic and Galera state transfers.
-          label: Security
+            - certificates
+          description: Encrypt client connections and Galera traffic and choose the server certificate.
+          label: TLS
       sectionsOrder:
         - databaseVersion
         - resources
@@ -611,34 +707,83 @@ spec:
           label: Resources
         security:
           components:
-            tlsEnabled:
+            certificates:
+              components:
+                certificateSecretName:
+                  fieldParams:
+                    helperText: Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Services (such as <name>-primary.<namespace>.svc) and pods (*.<name>-internal.<namespace>.svc.cluster.local) and localhost.
+                    label: Certificate secret
+                    modes:
+                      edit:
+                        disabled: true
+                  path: spec.parameters.tls.certificateSecretName
+                  uiType: text
+                  validation:
+                    regex:
+                      message: Must be a valid Kubernetes object name (lowercase letters, digits, '-' and '.')
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                issuer:
+                  components:
+                    issuerKind:
+                      fieldParams:
+                        helperText: Issuer when not set
+                        label: Issuer kind
+                        modes:
+                          edit:
+                            disabled: true
+                        options:
+                          - label: Issuer
+                            value: Issuer
+                          - label: ClusterIssuer
+                            value: ClusterIssuer
+                      path: spec.parameters.tls.issuer.kind
+                      uiType: select
+                    issuerName:
+                      fieldParams:
+                        helperText: Issuer that signs the server certificate. It must write its CA certificate (ca.crt), as CA and Vault issuers do. Needs cert-manager.
+                        label: cert-manager issuer
+                        modes:
+                          edit:
+                            disabled: true
+                      path: spec.parameters.tls.issuer.name
+                      uiType: text
+                      validation:
+                        celExpressions:
+                          - celExpr: '!has(spec.parameters) || !has(spec.parameters.tls) || !has(spec.parameters.tls.issuer) || !has(spec.parameters.tls.issuer.name) || spec.parameters.tls.issuer.name == '''' || !has(spec.parameters.tls.certificateSecretName) || spec.parameters.tls.certificateSecretName == '''''
+                            message: Use either an issuer or a certificate secret, not both
+                          - celExpr: '!has(spec.parameters) || !has(spec.parameters.tls) || !has(spec.parameters.tls.issuer) || !has(spec.parameters.tls.issuer.kind) || spec.parameters.tls.issuer.kind == '''' || (has(spec.parameters.tls.issuer.name) && spec.parameters.tls.issuer.name != '''')'
+                            message: Name the issuer
+                  componentsOrder:
+                    - issuerName
+                    - issuerKind
+                  groupType: line
+                  uiType: group
+              componentsOrder:
+                - issuer
+                - certificateSecretName
+              description: Leave empty to have the mariadb-operator issue the server certificate from a CA it creates for the instance. Clients verify the server with the CA certificate the connection secret holds as ca.crt. Can't be changed while TLS is on.
+              groupType: bordered
+              label: Certificates
+              uiType: group
+            mode:
               fieldParams:
-                defaultValue: "true"
-                label: Enable TLS
+                defaultValue: preferTLS
+                helperText: Required rejects clients that do not use TLS, at MariaDB and MaxScale; enable it once all clients trust the CA of the connection secret. Changing the mode restarts the pods one at a time. TLS can't be turned off after the instance is created.
+                label: TLS mode
                 options:
-                  - label: Enabled
-                    value: "true"
+                  - label: 'Preferred: clients choose whether to use TLS'
+                    value: preferTLS
+                  - label: 'Required: clients must use TLS'
+                    value: requireTLS
                   - label: Disabled
-                    value: "false"
-              path: spec.components.engine.parameters.tls.enabled
-              uiType: select
-            tlsRequired:
-              fieldParams:
-                defaultValue: "false"
-                helperText: Reject clients that do not connect using TLS. Enable only after all clients trust the published CA.
-                label: Require encrypted connections
-                options:
-                  - label: Optional
-                    value: "false"
-                  - label: Required
-                    value: "true"
-              path: spec.components.engine.parameters.tls.required
+                    value: disabled
+              path: spec.parameters.tls.mode
               uiType: select
           componentsOrder:
-            - tlsEnabled
-            - tlsRequired
-          description: Configure encryption for MariaDB client traffic.
-          label: Security
+            - mode
+            - certificates
+          description: Encrypt client connections, replication and choose the server certificate.
+          label: TLS
       sectionsOrder:
         - databaseVersion
         - resources
@@ -789,34 +934,83 @@ spec:
           label: Resources
         security:
           components:
-            tlsEnabled:
+            certificates:
+              components:
+                certificateSecretName:
+                  fieldParams:
+                    helperText: Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Service (<name>.<namespace>.svc) and localhost.
+                    label: Certificate secret
+                    modes:
+                      edit:
+                        disabled: true
+                  path: spec.parameters.tls.certificateSecretName
+                  uiType: text
+                  validation:
+                    regex:
+                      message: Must be a valid Kubernetes object name (lowercase letters, digits, '-' and '.')
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                issuer:
+                  components:
+                    issuerKind:
+                      fieldParams:
+                        helperText: Issuer when not set
+                        label: Issuer kind
+                        modes:
+                          edit:
+                            disabled: true
+                        options:
+                          - label: Issuer
+                            value: Issuer
+                          - label: ClusterIssuer
+                            value: ClusterIssuer
+                      path: spec.parameters.tls.issuer.kind
+                      uiType: select
+                    issuerName:
+                      fieldParams:
+                        helperText: Issuer that signs the server certificate. It must write its CA certificate (ca.crt), as CA and Vault issuers do. Needs cert-manager.
+                        label: cert-manager issuer
+                        modes:
+                          edit:
+                            disabled: true
+                      path: spec.parameters.tls.issuer.name
+                      uiType: text
+                      validation:
+                        celExpressions:
+                          - celExpr: '!has(spec.parameters) || !has(spec.parameters.tls) || !has(spec.parameters.tls.issuer) || !has(spec.parameters.tls.issuer.name) || spec.parameters.tls.issuer.name == '''' || !has(spec.parameters.tls.certificateSecretName) || spec.parameters.tls.certificateSecretName == '''''
+                            message: Use either an issuer or a certificate secret, not both
+                          - celExpr: '!has(spec.parameters) || !has(spec.parameters.tls) || !has(spec.parameters.tls.issuer) || !has(spec.parameters.tls.issuer.kind) || spec.parameters.tls.issuer.kind == '''' || (has(spec.parameters.tls.issuer.name) && spec.parameters.tls.issuer.name != '''')'
+                            message: Name the issuer
+                  componentsOrder:
+                    - issuerName
+                    - issuerKind
+                  groupType: line
+                  uiType: group
+              componentsOrder:
+                - issuer
+                - certificateSecretName
+              description: Leave empty to have the mariadb-operator issue the server certificate from a CA it creates for the instance. Clients verify the server with the CA certificate the connection secret holds as ca.crt. Can't be changed while TLS is on.
+              groupType: bordered
+              label: Certificates
+              uiType: group
+            mode:
               fieldParams:
-                defaultValue: "true"
-                label: Enable TLS
+                defaultValue: preferTLS
+                helperText: Required rejects clients that do not use TLS, at MariaDB and MaxScale; enable it once all clients trust the CA of the connection secret. Changing the mode restarts the pods one at a time. TLS can't be turned off after the instance is created.
+                label: TLS mode
                 options:
-                  - label: Enabled
-                    value: "true"
+                  - label: 'Preferred: clients choose whether to use TLS'
+                    value: preferTLS
+                  - label: 'Required: clients must use TLS'
+                    value: requireTLS
                   - label: Disabled
-                    value: "false"
-              path: spec.components.engine.parameters.tls.enabled
-              uiType: select
-            tlsRequired:
-              fieldParams:
-                defaultValue: "false"
-                helperText: Reject clients that do not connect using TLS. Enable only after all clients trust the published CA.
-                label: Require encrypted connections
-                options:
-                  - label: Optional
-                    value: "false"
-                  - label: Required
-                    value: "true"
-              path: spec.components.engine.parameters.tls.required
+                    value: disabled
+              path: spec.parameters.tls.mode
               uiType: select
           componentsOrder:
-            - tlsEnabled
-            - tlsRequired
-          description: Configure encryption for MariaDB client connections.
-          label: Security
+            - mode
+            - certificates
+          description: Encrypt client connections and choose the server certificate.
+          label: TLS
       sectionsOrder:
         - databaseVersion
         - resources
