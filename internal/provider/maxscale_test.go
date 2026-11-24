@@ -40,7 +40,7 @@ const testMaxScaleImage = "mariadb/maxscale:test"
 // newProxyContext builds a controller.Context for an Instance with the given
 // topology, engine parameters and proxy parameters. An empty proxyParams omits
 // the proxy component entirely.
-func newProxyContext(t *testing.T, topology, engineParams, proxyParams string, objs ...client.Object) *controller.Context {
+func newProxyContext(t *testing.T, topology, instanceParams, proxyParams string, objs ...client.Object) *controller.Context {
 	t.Helper()
 
 	scheme := runtime.NewScheme()
@@ -48,15 +48,16 @@ func newProxyContext(t *testing.T, topology, engineParams, proxyParams string, o
 	require.NoError(t, corev1alpha1.AddToScheme(scheme))
 	require.NoError(t, mariadbv1alpha1.AddToScheme(scheme))
 
-	engine := corev1alpha1.ComponentSpec{Type: common.ComponentTypeMariaDB}
-	if engineParams != "" {
-		engine.Parameters = &runtime.RawExtension{Raw: []byte(engineParams)}
-	}
 	instance := &corev1alpha1.Instance{
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default", UID: "uid"},
 		Spec: corev1alpha1.InstanceSpec{
-			Components: map[string]corev1alpha1.ComponentSpec{common.ComponentEngine: engine},
+			Components: map[string]corev1alpha1.ComponentSpec{
+				common.ComponentEngine: {Type: common.ComponentTypeMariaDB},
+			},
 		},
+	}
+	if instanceParams != "" {
+		instance.Spec.Parameters = &runtime.RawExtension{Raw: []byte(instanceParams)}
 	}
 	if topology != "" {
 		instance.Spec.Topology = &corev1alpha1.TopologySpec{Type: topology}
@@ -129,7 +130,7 @@ func TestSyncMaxScale_Creates(t *testing.T) {
 }
 
 func TestDesiredMaxScale_FollowsProxyAndEngine(t *testing.T) {
-	c := newProxyContext(t, "replication", `{"tls":{"required":true}}`, `{"enabled":true}`)
+	c := newProxyContext(t, "replication", `{"tls":{"mode":"requireTLS"}}`, `{"enabled":true}`)
 	proxy := c.Instance().Spec.Components[common.ComponentProxy]
 	proxy.Replicas = ptr.To(int32(3))
 	proxy.Service = &corev1alpha1.Service{ServiceType: corev1.ServiceTypeLoadBalancer}

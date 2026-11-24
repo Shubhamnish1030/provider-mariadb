@@ -1,6 +1,12 @@
-# TLS is enabled by default. This example additionally requires every client
-# connection to be encrypted. Clients must trust the ca.crt value published in
-# the Instance connection Secret.
+# TLS is on by default (mode: preferTLS) with certificates from a CA the
+# mariadb-operator creates. This example requires every client connection to
+# be encrypted and has a company CA, through a cert-manager ClusterIssuer,
+# sign the server certificate, which is also valid for an external name.
+# Clients verify the server with the ca.crt of the connection Secret.
+#
+# To bring your own certificate instead of an issuer, set
+# certificateSecretName to a Secret with tls.crt, tls.key and ca.crt; see the
+# README for the names it must be valid for.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
@@ -8,14 +14,18 @@ metadata:
 spec:
   providerRef:
     name: mariadb
+  parameters:
+    tls:
+      mode: requireTLS
+      issuer:
+        name: company-ca
+        kind: ClusterIssuer
+      additionalNames:
+        - mariadb.example.com
   components:
     engine:
       type: mariadb
       replicas: 1
-      parameters:
-        tls:
-          enabled: true
-          required: true
       resources:
         requests:
           cpu: 500m

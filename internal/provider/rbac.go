@@ -66,8 +66,10 @@ package provider
 // +kubebuilder:rbac:groups=backup.openeverest.io,resources=restores,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=backup.openeverest.io,resources=restores/status,verbs=get;update;patch
 
-// Kubernetes core resources: Secrets (credentials), Services (connection details).
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
+// Kubernetes core resources: Secrets (credentials; delete to reissue the
+// operator's server certificate for new additional names), Services
+// (connection details).
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch
 
 // Pods — the runtime counts the labelled component pods into status.components.

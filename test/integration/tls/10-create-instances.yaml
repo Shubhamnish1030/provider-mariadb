@@ -1,0 +1,67 @@
+# tls-managed: the operator's CA, TLS required.
+# tls-issuer: the company CA issues the certificate, with an additional name.
+# tls-own: replication with the user's own certificate Secret.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: tls-managed
+spec:
+  providerRef:
+    name: mariadb
+  parameters:
+    tls:
+      mode: requireTLS
+  components:
+    engine:
+      type: mariadb
+      replicas: 1
+      resources:
+        limits: {cpu: "1", memory: 1G}
+        requests: {cpu: 250m, memory: 512M}
+      storage:
+        size: 1Gi
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: tls-issuer
+spec:
+  providerRef:
+    name: mariadb
+  parameters:
+    tls:
+      issuer:
+        name: databases-ca
+      additionalNames:
+        - db.example.test
+  components:
+    engine:
+      type: mariadb
+      replicas: 1
+      resources:
+        limits: {cpu: "1", memory: 1G}
+        requests: {cpu: 250m, memory: 512M}
+      storage:
+        size: 1Gi
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: tls-own
+spec:
+  providerRef:
+    name: mariadb
+  topology:
+    type: replication
+  parameters:
+    tls:
+      certificateSecretName: own-tls
+  components:
+    engine:
+      type: mariadb
+      replicas: 2
+      resources:
+        limits: {cpu: "1", memory: 1G}
+        requests: {cpu: 250m, memory: 512M}
+      storage:
+        size: 1Gi

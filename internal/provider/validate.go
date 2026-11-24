@@ -66,24 +66,37 @@ func (p *MariaDBProvider) Validate(in controller.ValidationInput) controller.Val
 	if _, ok := instance.Spec.Components[common.ComponentEngine]; ok && provisioned(in.Old) {
 		errs = append(errs, validateEngineChange(spec, instance, instanceEngineState(spec, in.Old))...)
 	}
+	if provisioned(in.Old) {
+		errs = append(errs, validateTLSTransition(instance, in.Old)...)
+	}
 
 	return controller.ValidationResult{Errors: errs}
 }
 
-// ValidateReferences checks the bootstrap VolumeSnapshot and the update against
-// the deployed MariaDB.
+// ValidateReferences checks the bootstrap VolumeSnapshot, the certificate
+// Secret and the update against the deployed MariaDB.
 func (p *MariaDBProvider) ValidateReferences(c *controller.Context) (field.ErrorList, error) {
 	mdb := &mariadbv1alpha1.MariaDB{}
 	if err := c.Get(mdb, c.Name()); err != nil {
-		if apierrors.IsNotFound(err) {
-			return validateVolumeSnapshotReference(c, nil)
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("get MariaDB: %w", err)
 		}
-		return nil, fmt.Errorf("get MariaDB: %w", err)
+		errs, err := validateVolumeSnapshotReference(c, nil)
+		if err != nil {
+			return nil, err
+		}
+		tlsErrs, err := validateDeployedTLS(c, nil)
+		return append(errs, tlsErrs...), err
 	}
 	errs, err := validateVolumeSnapshotReference(c, mdb)
 	if err != nil {
 		return nil, err
 	}
+	tlsErrs, err := validateDeployedTLS(c, mdb)
+	if err != nil {
+		return nil, err
+	}
+	errs = append(errs, tlsErrs...)
 	spec, err := c.ProviderSpec()
 	if err != nil {
 		return nil, fmt.Errorf("get provider spec: %w", err)
@@ -184,27 +197,6 @@ func validateImage(spec *corev1alpha1.ProviderSpec, in *corev1alpha1.Instance, p
 	return field.ErrorList{field.Required(path.Child("image"),
 		fmt.Sprintf("the provider's catalog has no default %s image", controller.GetComponentType(spec, name)),
 	)}
-}
-
-// validateTLS rejects TLS enforcement or Galera SST encryption while TLS is disabled.
-func validateTLS(in *corev1alpha1.Instance) field.ErrorList {
-	settings, err := resolveTLSSettings(in)
-	if err != nil {
-		return field.ErrorList{field.Invalid(enginePath.Child("parameters"), field.OmitValueType{}, err.Error())}
-	}
-	if settings.Enabled {
-		return nil
-	}
-
-	path := enginePath.Child("parameters", "tls")
-	var errs field.ErrorList
-	if settings.Required {
-		errs = append(errs, field.Invalid(path.Child("required"), true, "must be false while TLS is disabled"))
-	}
-	if settings.GaleraSSTEnabled {
-		errs = append(errs, field.Invalid(path.Child("galeraSSTEnabled"), true, "must be false while TLS is disabled"))
-	}
-	return errs
 }
 
 // validatePITR checks that binary logs of a replication primary go to one storage with a physical base backup.

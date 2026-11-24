@@ -32,7 +32,7 @@ Source of truth: `internal/provider/`, `definition/`, [README](README.md#capabil
 | Custom `my.cnf` | ✅ | engine `configuration` → `spec.myCnf` |
 | Proxy (MaxScale) | ✅ | `proxy` component; failover stays with the operator |
 | Scheduling | ✅ | affinity (no `podAffinity`), nodeSelector, tolerations, topology spread |
-| TLS | ✅ | on by default, opt-in `required`, Galera SST TLS, CA in connection Secret; cert-manager open ([#39]) |
+| TLS | ✅ | `spec.parameters.tls` (common shape): `disabled`/`preferTLS`/`requireTLS`, cert-manager issuer, own certificate Secret, `additionalNames`, Galera SST TLS, CA in connection Secret |
 | Exposure | ✅ | ClusterIP / LoadBalancer / NodePort on the primary (HA) or general Service; read Service open ([#105]) |
 | Monitoring | ✅ | `spec.monitoring.destinations` → mysqld-exporter on demand, one `/probe` endpoint per pod in `status.monitoring.sources`; scrape objects come from the class extensions; alerts ([#103]) open |
 | Logical backups (on demand + scheduled) | ✅ | `mariadb` BackupClass, `type: logical`, S3 only |
@@ -100,7 +100,6 @@ Must be closed before the pre-alpha banner can be removed. Ordered by risk.
 | [#111] | HA tuning parameters (semi-sync, max lag, failover delay, switchover, Galera SST/probes) |
 | [#112] | `timeZone` engine parameter |
 | [#76], [#77] | zstd compression for backups and PITR binlogs |
-| [#39] | cert-manager integration |
 | [#113] | Cross-cluster DR replica (operator multi-cluster topology) |
 | [#114] | PITR archival and recovery on Galera/standalone — **blocked upstream** (`docs/pitr.md`, mariadb-operator#1961) |
 | [#115] | Refresh mysqld-exporter / MaxScale versions |
@@ -137,7 +136,6 @@ Must be closed before the pre-alpha banner can be removed. Ordered by risk.
 - Follow the MongoDB provider (`provider-percona-server-mongodb/`) for patterns:
   backup import, maintenance gating, upgrade preflight, `userSecretRef`, PVC cleanup.
 
-[#39]: https://github.com/openeverest/provider-mariadb/issues/39
 [#76]: https://github.com/openeverest/provider-mariadb/issues/76
 [#77]: https://github.com/openeverest/provider-mariadb/issues/77
 [#78]: https://github.com/openeverest/provider-mariadb/issues/78

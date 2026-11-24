@@ -48,15 +48,16 @@ func newTLSContext(t *testing.T, topology, params string, objs ...client.Object)
 		t.Fatalf("add MariaDB scheme: %v", err)
 	}
 
-	engine := corev1alpha1.ComponentSpec{Type: common.ComponentTypeMariaDB}
-	if params != "" {
-		engine.Parameters = &runtime.RawExtension{Raw: []byte(params)}
-	}
 	instance := &corev1alpha1.Instance{
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
 		Spec: corev1alpha1.InstanceSpec{
-			Components: map[string]corev1alpha1.ComponentSpec{common.ComponentEngine: engine},
+			Components: map[string]corev1alpha1.ComponentSpec{
+				common.ComponentEngine: {Type: common.ComponentTypeMariaDB},
+			},
 		},
+	}
+	if params != "" {
+		instance.Spec.Parameters = &runtime.RawExtension{Raw: []byte(params)}
 	}
 	if topology != "" {
 		instance.Spec.Topology = &corev1alpha1.TopologySpec{Type: topology}
@@ -95,14 +96,26 @@ func TestResolveTLSSettings(t *testing.T) {
 			want:     tlsSettings{Enabled: true},
 		},
 		{
-			name:   "TLS can be disabled explicitly",
-			params: `{"tls":{"enabled":false}}`,
+			name:   "TLS can be disabled",
+			params: `{"tls":{"mode":"disabled"}}`,
 			want:   tlsSettings{},
 		},
 		{
-			name:   "UI string booleans are decoded",
-			params: `{"tls":{"enabled":"true","required":"true"}}`,
+			name:     "disabled turns galera SST off",
+			topology: "galera",
+			params:   `{"tls":{"mode":"disabled"}}`,
+			want:     tlsSettings{},
+		},
+		{
+			name:   "requireTLS enforces TLS",
+			params: `{"tls":{"mode":"requireTLS"}}`,
 			want:   tlsSettings{Enabled: true, Required: true},
+		},
+		{
+			name:     "galera SST can be turned off, from a UI string",
+			topology: "galera",
+			params:   `{"tls":{"mode":"preferTLS","galeraSSTEnabled":"false"}}`,
+			want:     tlsSettings{Enabled: true},
 		},
 	}
 
@@ -164,14 +177,14 @@ func TestBuildConnectionDetailsWaitsForTLSCA(t *testing.T) {
 }
 
 func TestBuildConnectionDetailsWaitsForRootSecret(t *testing.T) {
-	_, err := buildConnectionDetails(newTLSContext(t, "", `{"tls":{"enabled":false}}`, connectionSecrets("test")[0]), nil)
+	_, err := buildConnectionDetails(newTLSContext(t, "", `{"tls":{"mode":"disabled"}}`, connectionSecrets("test")[0]), nil)
 	if err == nil || !strings.Contains(err.Error(), "root credentials") {
 		t.Fatalf("expected a missing root Secret error, got %v", err)
 	}
 }
 
 func TestBuildConnectionDetailsOmitsTLSWhenDisabled(t *testing.T) {
-	details, err := buildConnectionDetails(newTLSContext(t, "", `{"tls":{"enabled":false}}`, connectionSecrets("test")...), nil)
+	details, err := buildConnectionDetails(newTLSContext(t, "", `{"tls":{"mode":"disabled"}}`, connectionSecrets("test")...), nil)
 	if err != nil {
 		t.Fatalf("buildConnectionDetails() error = %v", err)
 	}
