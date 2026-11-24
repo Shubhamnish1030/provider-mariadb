@@ -219,8 +219,9 @@ func deployedCertificateSource(mdb *mariadbv1alpha1.MariaDB) string {
 }
 
 // requiredTLSNames are the names the operator, the replicas and in-cluster
-// clients verify the server certificate against: the client Service and,
-// on galera and replication, every pod.
+// clients verify the server certificate against: the client Service, on
+// galera and replication every pod, and localhost, which the operator's
+// probes connect to.
 func requiredTLSNames(c *controller.Context) []string {
 	service := c.Name()
 	if isHATopology(c) {
@@ -236,7 +237,7 @@ func requiredTLSNames(c *controller.Context) []string {
 			names = append(names, fmt.Sprintf("%s-%d.%s-internal.%s.svc.cluster.local", c.Name(), i, c.Name(), ns))
 		}
 	}
-	return names
+	return append(names, "localhost")
 }
 
 // checkCertificateSecret checks a certificate Secret the user provides: it

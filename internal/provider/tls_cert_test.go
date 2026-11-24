@@ -98,7 +98,7 @@ func certSecret(name string, crt, key, ca []byte) *corev1.Secret {
 
 // standaloneNames are the names the standalone instance "test" in "default"
 // must be valid for.
-var standaloneNames = []string{"test.default.svc.cluster.local", "test.default.svc"}
+var standaloneNames = []string{"test.default.svc.cluster.local", "test.default.svc", "localhost"}
 
 func TestCheckCertificateSecret(t *testing.T) {
 	ca := newTestCA(t)
@@ -149,6 +149,7 @@ func TestRequiredTLSNames(t *testing.T) {
 	assert.Equal(t, []string{
 		"test-primary.default.svc.cluster.local", "test-primary.default.svc",
 		"test-0.test-internal.default.svc.cluster.local", "test-1.test-internal.default.svc.cluster.local",
+		"localhost",
 	}, requiredTLSNames(c))
 }
 

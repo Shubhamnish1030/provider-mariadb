@@ -246,14 +246,15 @@ kubectl create secret generic my-db-tls -n <namespace> \
   --from-file=ca.crt=company-ca.pem
 ```
 
-The operator and the replicas verify the certificate by name, so it must be
-valid for:
+The operator, its probes and the replicas verify the certificate by name, so
+it must be valid for:
 
 - `<svc>.<namespace>.svc.cluster.local` and `<svc>.<namespace>.svc`, where
   `<svc>` is `<name>` for `standalone` and `<name>-primary` for `galera` and
   `replication`;
 - for `galera` and `replication`, the pods:
   `*.<name>-internal.<namespace>.svc.cluster.local`;
+- `localhost`, which the operator's probes connect to;
 - any other name clients connect to.
 
 The provider checks the Secret (keys, key pair, that `ca.crt` verifies the

@@ -178,7 +178,7 @@ ui:
               path: spec.parameters.tls.certificateSecretName
               fieldParams:
                 label: "Certificate secret"
-                helperText: "Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Service (<name>.<namespace>.svc)."
+                helperText: "Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Service (<name>.<namespace>.svc) and localhost."
                 modes:
                   edit:
                     disabled: true

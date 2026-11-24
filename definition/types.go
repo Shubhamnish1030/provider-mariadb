@@ -62,8 +62,9 @@ type TLSParameters struct {
 	// (tls.crt), its private key (tls.key) and the CA certificate it is
 	// verified with (ca.crt). The certificate must be valid for the names of
 	// the instance's Services and, for galera and replication, of its pods
-	// (*.<instance>-internal.<namespace>.svc.cluster.local), as well as for
-	// the names clients connect to. Does not need cert-manager. Cannot be
+	// (*.<instance>-internal.<namespace>.svc.cluster.local), for localhost,
+	// which the operator's probes connect to, and for the names clients
+	// connect to. Does not need cert-manager. Cannot be
 	// combined with issuer or additionalNames.
 	// +optional
 	CertificateSecretName string `json:"certificateSecretName,omitempty"`
