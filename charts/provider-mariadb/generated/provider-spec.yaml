@@ -113,8 +113,9 @@ spec:
                 (tls.crt), its private key (tls.key) and the CA certificate it is
                 verified with (ca.crt). The certificate must be valid for the names of
                 the instance's Services and, for galera and replication, of its pods
-                (*.<instance>-internal.<namespace>.svc.cluster.local), as well as for
-                the names clients connect to. Does not need cert-manager. Cannot be
+                (*.<instance>-internal.<namespace>.svc.cluster.local), for localhost,
+                which the operator's probes connect to, and for the names clients
+                connect to. Does not need cert-manager. Cannot be
                 combined with issuer or additionalNames.
               type: string
             galeraSSTEnabled:
@@ -436,7 +437,7 @@ spec:
               components:
                 certificateSecretName:
                   fieldParams:
-                    helperText: Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Services (such as <name>-primary.<namespace>.svc) and pods (*.<name>-internal.<namespace>.svc.cluster.local).
+                    helperText: Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Services (such as <name>-primary.<namespace>.svc) and pods (*.<name>-internal.<namespace>.svc.cluster.local) and localhost.
                     label: Certificate secret
                     modes:
                       edit:
@@ -710,7 +711,7 @@ spec:
               components:
                 certificateSecretName:
                   fieldParams:
-                    helperText: Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Services (such as <name>-primary.<namespace>.svc) and pods (*.<name>-internal.<namespace>.svc.cluster.local).
+                    helperText: Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Services (such as <name>-primary.<namespace>.svc) and pods (*.<name>-internal.<namespace>.svc.cluster.local) and localhost.
                     label: Certificate secret
                     modes:
                       edit:
@@ -937,7 +938,7 @@ spec:
               components:
                 certificateSecretName:
                   fieldParams:
-                    helperText: Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Service (<name>.<namespace>.svc).
+                    helperText: Secret with the server certificate and any intermediate CA certificates (tls.crt), its key (tls.key) and the CA certificate (ca.crt). The certificate must be valid for the instance's Service (<name>.<namespace>.svc) and localhost.
                     label: Certificate secret
                     modes:
                       edit:
